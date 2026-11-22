@@ -1,0 +1,1 @@
+ALTER FUNCTION public.prevent_unauthorized_profile_updates() SET search_path = '';

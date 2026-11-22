@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist/
 
 # misc
 .DS_Store
@@ -38,13 +39,17 @@ yarn-error.log*
 next-env.d.ts
 
 .genkit/*
+# Ignore every environment file by default; keep only the safe variable-name template.
 .env
-.env.local
-.env.*.local
-,env*
-,env-1.local
+.env.*
 !.env.example
 
 # firebase
 firebase-debug.log
 firestore-debug.log
+# Local validation output (never commit logs)
+/local-audit-logs/
+
+# Playwright output
+/test-results/
+/playwright-report/

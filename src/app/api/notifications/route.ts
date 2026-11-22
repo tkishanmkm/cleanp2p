@@ -15,6 +15,7 @@ export async function GET() {
       .from('notifications')
       .select('*')
       .eq('user_id', user.id)
+      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order('created_at', { ascending: false })
       .limit(50);
 

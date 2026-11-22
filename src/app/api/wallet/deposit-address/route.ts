@@ -2,36 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { deriveUserKeys, deriveEvmAddress } from '@/lib/crypto/hd-engine';
-
-export { deriveEvmAddress };
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+function getAuthClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const authKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !authKey) return null;
+
+  return createClient(supabaseUrl, authKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
-  let userId = req.headers.get('x-user-id');
-  if (userId) return userId;
-
+  // Never trust a caller-supplied user ID header; identify users only from verified auth.
+  const authClient = getAuthClient();
   const authHeader = req.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  if (authClient && authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     try {
-      const { data } = await supabaseAdmin.auth.getUser(token);
+      const { data } = await authClient.auth.getUser(token);
       if (data?.user?.id) return data.user.id;
     } catch {}
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
   if (supabaseUrl && supabaseAnonKey) {
     try {
-      const cookieStore = cookies();
+      const cookieStore = await cookies();
       const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
         cookies: { getAll: () => cookieStore.getAll() },
       });
@@ -40,8 +39,8 @@ async function resolveUserId(req: NextRequest): Promise<string | null> {
     } catch {}
   }
 
-  const { searchParams } = new URL(req.url);
-  return searchParams.get('user_id');
+  // Do not accept user_id query parameters as an authentication substitute.
+  return null;
 }
 
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';

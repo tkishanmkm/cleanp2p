@@ -1,266 +1,147 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
+type AtomicBulkAdAction = 'PAUSE' | 'RESUME' | 'DELETE';
+
+type AtomicBulkAdResult = {
+  success: boolean;
+  affectedCount: number;
+  skippedCount: number;
+  partialFailure: boolean;
+  failedStage?: string;
+  error?: string;
+};
+
+function readAtomicCount(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * All bulk advertisement changes, their global-pause marker and audit record
+ * are committed by one trusted database transaction. A failure rolls the full
+ * operation back; the application never performs split-table fallback writes.
+ */
+async function runAtomicBulkAdAction(
+  adminId: string,
+  adminEmail: string,
+  action: AtomicBulkAdAction
+): Promise<AtomicBulkAdResult> {
+  try {
+    if (!adminId || !adminEmail.trim()) {
+      return {
+        success: false,
+        affectedCount: 0,
+        skippedCount: 0,
+        partialFailure: false,
+        failedStage: 'validate_admin_identity',
+        error: 'A verified administrator identity is required for bulk advertisement controls.',
+      };
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase.rpc('admin_bulk_ads_action_atomic', {
+      p_admin_id: adminId,
+      p_admin_email: adminEmail,
+      p_action: action,
+    });
+
+    if (error) {
+      console.error('[runAtomicBulkAdAction] Database transaction rejected:', {
+        action,
+        code: error.code || 'unknown',
+      });
+      return {
+        success: false,
+        affectedCount: 0,
+        skippedCount: 0,
+        partialFailure: false,
+        failedStage: 'atomic_database_transaction',
+        error: error.message || 'The atomic advertisement operation could not be confirmed. Reconcile the current ad states before retrying.',
+      };
+    }
+
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return {
+        success: false,
+        affectedCount: 0,
+        skippedCount: 0,
+        partialFailure: false,
+        failedStage: 'validate_atomic_response',
+        error: 'The database returned an invalid bulk advertisement operation response.',
+      };
+    }
+
+    const result = data as Record<string, unknown>;
+    const affectedCount = readAtomicCount(result.affected_count);
+    const skippedCount = readAtomicCount(result.skipped_count ?? 0);
+    if (
+      result.success !== true ||
+      result.action !== action ||
+      affectedCount === null ||
+      skippedCount === null
+    ) {
+      return {
+        success: false,
+        affectedCount: 0,
+        skippedCount: 0,
+        partialFailure: false,
+        failedStage: 'validate_atomic_response',
+        error: 'The database returned an incomplete or mismatched bulk advertisement operation result.',
+      };
+    }
+
+    return {
+      success: true,
+      affectedCount,
+      skippedCount,
+      partialFailure: false,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[runAtomicBulkAdAction] Error:', message);
+    return {
+      success: false,
+      affectedCount: 0,
+      skippedCount: 0,
+      partialFailure: false,
+      failedStage: 'atomic_database_transaction',
+      error: message,
+    };
+  }
+}
+
 export async function pauseAllAds(adminId: string, adminEmail: string): Promise<{
   success: boolean;
   affectedCount: number;
+  partialFailure?: boolean;
+  failedStage?: string;
   error?: string;
 }> {
-  try {
-    const supabase = getSupabaseAdminClient();
-
-    // 1. Find all currently active ads in ads and p2p_ads
-    const { data: activeAds, error: fetchAdsErr } = await supabase
-      .from("ads")
-      .select("id")
-      .or("status.eq.active,status.eq.published,status.eq.ACTIVE,is_active.eq.true");
-
-    const { data: activeP2pAds, error: fetchP2pErr } = await supabase
-      .from("p2p_ads")
-      .select("id")
-      .or("status.eq.ACTIVE,active.eq.true");
-
-    if (fetchAdsErr && fetchP2pErr) {
-      throw fetchAdsErr || fetchP2pErr;
-    }
-
-    const adIds = (activeAds || []).map((a: any) => a.id);
-    const p2pAdIds = (activeP2pAds || []).map((a: any) => a.id);
-    const totalCount = adIds.length + p2pAdIds.length;
-
-    // 2. Mark active ads as GLOBAL_PAUSED
-    if (adIds.length > 0) {
-      await supabase
-        .from("ads")
-        .update({
-          status: "GLOBAL_PAUSED",
-          is_active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", adIds);
-    }
-
-    if (p2pAdIds.length > 0) {
-      await supabase
-        .from("p2p_ads")
-        .update({
-          status: "GLOBAL_PAUSED",
-          active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", p2pAdIds);
-    }
-
-    // Also update advertisements table if any active
-    await supabase
-      .from("advertisements")
-      .update({
-        status: "GLOBAL_PAUSED",
-        is_active: false,
-      })
-      .eq("is_active", true)
-      .catch(() => {});
-
-    // Save timestamp in system_settings
-    await supabase
-      .from("system_settings")
-      .upsert(
-        {
-          key: "all_ads_paused_at",
-          value: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" }
-      );
-
-    // Audit log
-    await supabase.from("admin_audit_logs").insert({
-      admin_id: adminId,
-      admin_email: adminEmail,
-      action: "BULK_ADS_PAUSED",
-      details: {
-        affected_count: totalCount,
-        ads_count: adIds.length,
-        p2p_ads_count: p2pAdIds.length,
-        paused_at: new Date().toISOString(),
-      },
-      created_at: new Date().toISOString(),
-    });
-
-    return { success: true, affectedCount: totalCount };
-  } catch (err: any) {
-    console.error("[pauseAllAds] Error:", err);
-    return { success: false, affectedCount: 0, error: err.message };
-  }
+  const result = await runAtomicBulkAdAction(adminId, adminEmail, 'PAUSE');
+  return result;
 }
 
 export async function resumeAllAds(adminId: string, adminEmail: string): Promise<{
   success: boolean;
   affectedCount: number;
   skippedCount: number;
+  partialFailure?: boolean;
+  failedStage?: string;
   error?: string;
 }> {
-  try {
-    const supabase = getSupabaseAdminClient();
-
-    // 1. Query ads that were specifically paused by global pause
-    const { data: pausedAds } = await supabase
-      .from("ads")
-      .select("id, user_id")
-      .eq("status", "GLOBAL_PAUSED");
-
-    const { data: pausedP2pAds } = await supabase
-      .from("p2p_ads")
-      .select("id, user_id")
-      .eq("status", "GLOBAL_PAUSED");
-
-    const allPaused = [...(pausedAds || []), ...(pausedP2pAds || [])];
-
-    if (allPaused.length === 0) {
-      return { success: true, affectedCount: 0, skippedCount: 0 };
-    }
-
-    // 2. Fetch all user IDs that are banned or suspended to exclude them
-    const userIds = Array.from(new Set(allPaused.map((a: any) => a.user_id).filter(Boolean)));
-    let restrictedUserSet = new Set<string>();
-
-    if (userIds.length > 0) {
-      const { data: restrictedProfiles } = await supabase
-        .from("profiles")
-        .select("id")
-        .in("id", userIds)
-        .or("is_banned.eq.true,is_suspended.eq.true,status.eq.banned,status.eq.suspended,status.eq.restricted");
-
-      restrictedUserSet = new Set((restrictedProfiles || []).map((p: any) => p.id));
-    }
-
-    // Eligible ads are those whose owner is in good standing
-    const eligibleAdIds = (pausedAds || [])
-      .filter((a: any) => !restrictedUserSet.has(a.user_id))
-      .map((a: any) => a.id);
-
-    const eligibleP2pAdIds = (pausedP2pAds || [])
-      .filter((a: any) => !restrictedUserSet.has(a.user_id))
-      .map((a: any) => a.id);
-
-    const totalEligible = eligibleAdIds.length + eligibleP2pAdIds.length;
-    const skippedCount = allPaused.length - totalEligible;
-
-    if (eligibleAdIds.length > 0) {
-      await supabase
-        .from("ads")
-        .update({
-          status: "active",
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", eligibleAdIds);
-    }
-
-    if (eligibleP2pAdIds.length > 0) {
-      await supabase
-        .from("p2p_ads")
-        .update({
-          status: "ACTIVE",
-          active: true,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", eligibleP2pAdIds);
-    }
-
-    // Clear all_ads_paused_at
-    await supabase
-      .from("system_settings")
-      .delete()
-      .eq("key", "all_ads_paused_at");
-
-    // Audit log
-    await supabase.from("admin_audit_logs").insert({
-      admin_id: adminId,
-      admin_email: adminEmail,
-      action: "BULK_ADS_RESUMED",
-      details: {
-        affected_count: totalEligible,
-        skipped_count: skippedCount,
-        resumed_at: new Date().toISOString(),
-      },
-      created_at: new Date().toISOString(),
-    });
-
-    return {
-      success: true,
-      affectedCount: totalEligible,
-      skippedCount,
-    };
-  } catch (err: any) {
-    console.error("[resumeAllAds] Error:", err);
-    return { success: false, affectedCount: 0, skippedCount: 0, error: err.message };
-  }
+  const result = await runAtomicBulkAdAction(adminId, adminEmail, 'RESUME');
+  return result;
 }
 
 export async function deleteAllAds(adminId: string, adminEmail: string): Promise<{
   success: boolean;
   affectedCount: number;
+  partialFailure?: boolean;
+  failedStage?: string;
   error?: string;
 }> {
-  try {
-    const supabase = getSupabaseAdminClient();
-
-    // Soft-delete all non-deleted ads in both ads and p2p_ads
-    const { data: adsToDelete } = await supabase
-      .from("ads")
-      .select("id")
-      .neq("status", "DELETED");
-
-    const { data: p2pAdsToDelete } = await supabase
-      .from("p2p_ads")
-      .select("id")
-      .neq("status", "DELETED");
-
-    const adIds = (adsToDelete || []).map((a: any) => a.id);
-    const p2pAdIds = (p2pAdsToDelete || []).map((a: any) => a.id);
-    const totalCount = adIds.length + p2pAdIds.length;
-
-    if (adIds.length > 0) {
-      await supabase
-        .from("ads")
-        .update({
-          status: "DELETED",
-          is_active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", adIds);
-    }
-
-    if (p2pAdIds.length > 0) {
-      await supabase
-        .from("p2p_ads")
-        .update({
-          status: "DELETED",
-          active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", p2pAdIds);
-    }
-
-    // Audit log
-    await supabase.from("admin_audit_logs").insert({
-      admin_id: adminId,
-      admin_email: adminEmail,
-      action: "BULK_ADS_DELETED",
-      details: {
-        affected_count: totalCount,
-        ads_count: adIds.length,
-        p2p_ads_count: p2pAdIds.length,
-        deleted_at: new Date().toISOString(),
-      },
-      created_at: new Date().toISOString(),
-    });
-
-    return { success: true, affectedCount: totalCount };
-  } catch (err: any) {
-    console.error("[deleteAllAds] Error:", err);
-    return { success: false, affectedCount: 0, error: err.message };
-  }
+  const result = await runAtomicBulkAdAction(adminId, adminEmail, 'DELETE');
+  return result;
 }
 
 export async function banAllUsers(
@@ -443,39 +324,48 @@ export async function adminUnblockUserBlock(
   try {
     const supabase = getSupabaseAdminClient();
 
-    // 1. Delete from user_blocks
-    if (blockId) {
-      await supabase.from("user_blocks").delete().eq("id", blockId);
-    } else if (blockerId && blockedId) {
-      await supabase
-        .from("user_blocks")
-        .delete()
-        .eq("blocker_id", blockerId)
-        .eq("blocked_id", blockedId);
+    // Require a concrete block target so an accidental empty request cannot report success.
+    if (!blockId && (!blockerId || !blockedId)) {
+      return { success: false, error: "A block ID or both blocker and blocked user IDs are required." };
+    }
+
+    // 1. Delete from user_blocks. This is not transactional with the profile mirror;
+    // any later failure is surfaced for reconciliation rather than reported as success.
+    const { error: blockDeleteError } = blockId
+      ? await supabase.from("user_blocks").delete().eq("id", blockId)
+      : await supabase.from("user_blocks").delete().eq("blocker_id", blockerId).eq("blocked_id", blockedId);
+    if (blockDeleteError) {
+      throw new Error("Failed to delete the user block (code: " + (blockDeleteError.code || "unknown") + ").");
     }
 
     // 2. Sync profiles.blocked_users array on blocker profile
     if (blockerId) {
-      const { data: blockerProfile } = await supabase
+      const { data: blockerProfile, error: blockerProfileError } = await supabase
         .from("profiles")
         .select("blocked_users")
         .eq("id", blockerId)
         .maybeSingle();
+      if (blockerProfileError) {
+        throw new Error("The block row was deleted, but the blocker profile could not be read (code: " + (blockerProfileError.code || "unknown") + "). Reconcile the profile block list.");
+      }
 
       if (blockerProfile && Array.isArray(blockerProfile.blocked_users)) {
         const updatedBlocked = blockerProfile.blocked_users.filter((id: string) => id !== blockedId);
-        await supabase
+        const { error: blockerProfileUpdateError } = await supabase
           .from("profiles")
           .update({
             blocked_users: updatedBlocked,
             updated_at: new Date().toISOString(),
           })
           .eq("id", blockerId);
+        if (blockerProfileUpdateError) {
+          throw new Error("The block row was deleted, but the blocker profile list could not be synchronized (code: " + (blockerProfileUpdateError.code || "unknown") + "). Reconcile before retrying.");
+        }
       }
     }
 
     // 3. Log audit event
-    await supabase.from("admin_audit_logs").insert({
+    const { error: unblockAuditError } = await supabase.from("admin_audit_logs").insert({
       admin_id: adminId,
       admin_email: adminEmail,
       action: "USER_UNBLOCKED_BY_ADMIN",
@@ -489,6 +379,9 @@ export async function adminUnblockUserBlock(
       },
       created_at: new Date().toISOString(),
     });
+    if (unblockAuditError) {
+      throw new Error("The unblock changes may be applied, but the audit record failed (code: " + (unblockAuditError.code || "unknown") + "). Reconcile and record the event before retrying.");
+    }
 
     return { success: true };
   } catch (err: any) {

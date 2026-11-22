@@ -1,70 +1,78 @@
 "use server";
 
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 export async function loginAdminAction(formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
 
   if (!email || !password) {
     return { error: "Please provide both email and password." };
   }
 
-  const cookieStore = await cookies();
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {
-            // Handled via middleware
-          }
-        },
-      },
-    }
-  );
-
-  // 1. Authenticate user
+  const supabase = await createClient();
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
 
-  if (authError) {
-    return { error: `[Auth Error]: ${authError.message}` };
+  if (authError || !authData.user) {
+    return { error: "Authentication failed. Check your credentials and try again." };
   }
 
-  if (!authData.user) {
-    return { error: "[Auth Error]: Account authenticated, but user record was null." };
-  }
+  try {
+    const adminSupabase = createAdminClient();
+    const { data: verification, error: verificationError } = await adminSupabase.rpc(
+      "verify_admin_login",
+      { user_uuid: authData.user.id },
+    );
 
-  // 2. Query admin profile bypassing RLS with service role client
-  const adminSupabase = createAdminClient();
-  const { data: profile, error: profileError } = await adminSupabase
-    .from("profiles")
-    .select("role, is_suspended")
-    .eq("id", authData.user.id)
-    .maybeSingle();
+    if (verificationError || verification?.[0]?.is_valid !== true) {
+      await supabase.auth.signOut();
+      return { error: "Access denied. An active administrator account is required." };
+    }
 
-  if (profileError || !profile || String(profile.role).trim().toLowerCase() !== "admin" || profile.is_suspended) {
+    const { data: profile, error: profileError } = await adminSupabase
+      .from("profiles")
+      .select(
+        "admin_2fa_enabled, is_2fa_enabled, is_banned, is_suspended, is_restricted, is_on_hold, is_emergency_frozen, is_minor_restricted, status, account_status"
+      )
+      .eq("id", authData.user.id)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
+      return { error: "Administrator account state could not be verified." };
+    }
+
+    const status = String(profile.status || "").toLowerCase();
+    const accountStatus = String(profile.account_status || "").toLowerCase();
+    const blocked =
+      profile.is_banned === true ||
+      profile.is_suspended === true ||
+      profile.is_restricted === true ||
+      profile.is_on_hold === true ||
+      profile.is_emergency_frozen === true ||
+      profile.is_minor_restricted === true ||
+      status !== "active" ||
+      ["banned", "suspended", "restricted", "on_hold", "hold", "inactive", "deleted", "deletion_pending"].includes(accountStatus);
+
+    if (blocked) {
+      await supabase.auth.signOut();
+      return { error: "This administrator account is not active or eligible for access." };
+    }
+
+    if (profile.admin_2fa_enabled === true || profile.is_2fa_enabled === true) {
+      redirect("/adminnarayan/login/challenge");
+    }
+
+    redirect("/adminnarayan/dashboard");
+  } catch (error) {
+    // Next's redirect signal must propagate; all other failures sign out.
+    if (error && typeof error === "object" && "digest" in error) throw error;
     await supabase.auth.signOut();
-    return { 
-      error: `Access denied: Insufficient privileges or account suspended.` 
-    };
+    return { error: "Administrator access could not be verified. Please retry." };
   }
-
-  // 3. Successful login -> issue HTTP-only cookies and redirect
-  redirect("/adminnarayan/dashboard");
 }

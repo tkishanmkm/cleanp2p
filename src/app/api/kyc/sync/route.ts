@@ -1,14 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createServerClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { createClient as createServerClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-function isApprovedText(val: any): boolean {
-  if (!val) return false;
-  const s = String(val).toLowerCase();
-  return s === 'approved' || s === 'passed' || s === 'completed' || s === 'true' || s === 'verified';
+const MAX_SYNC_BODY_BYTES = 4 * 1024;
+
+async function readBoundedBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_SYNC_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function normalizeProviderStatus(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const allowed = new Set([
+    'approved', 'passed', 'completed', 'declined', 'rejected', 'failed',
+    'in_review', 'pending', 'pending_review', 'submitted',
+    'resubmitted', 'resubmit_required', 'expired', 'abandoned',
+  ]);
+  return allowed.has(normalized) ? normalized : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -19,297 +56,180 @@ export async function POST(req: NextRequest) {
   return handleSync(req);
 }
 
+/**
+ * Read-only reconciliation endpoint.
+ *
+ * Provider polling is not a signed webhook and must never grant or revoke KYC
+ * privileges. The signed Didit webhook is the sole state-changing authority and
+ * applies profile + verification + event-idempotency changes atomically.
+ */
 async function handleSync(req: NextRequest) {
   try {
     const admin = getSupabaseAdminClient();
     const supabase = await createServerClient();
 
-    // 1. Authenticate caller session
-    let sessionUser: any = null;
-
+    let sessionUser: { id: string; email?: string } | null = null;
     const authHeader = req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const { data } = await admin.auth.getUser(token);
-      if (data?.user) sessionUser = data.user;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7).trim();
+      if (token) {
+        const { data, error } = await admin.auth.getUser(token);
+        if (!error && data.user) sessionUser = { id: data.user.id, email: data.user.email };
+      }
     }
 
     if (!sessionUser) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) sessionUser = user;
+      if (user) sessionUser = { id: user.id, email: user.email };
     }
 
     if (!sessionUser) {
-      return NextResponse.json({ error: 'Unauthorized: Authentication session required' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Resolve requested target user
-    let requestedUserId: string | null = null;
-    let requestedEmail: string | null = null;
-
-    const url = new URL(req.url);
-    const queryUserId = url.searchParams.get('userId') || url.searchParams.get('id');
-    const queryEmail = url.searchParams.get('email');
-    if (queryUserId) requestedUserId = queryUserId;
-    if (queryEmail) requestedEmail = queryEmail;
+    let requestedUserId: unknown = new URL(req.url).searchParams.get('userId')
+      || new URL(req.url).searchParams.get('id');
 
     if (req.method === 'POST') {
-      try {
-        const body = await req.json().catch(() => ({}));
-        if (body.userId) requestedUserId = body.userId;
-        if (body.id) requestedUserId = body.id;
-        if (body.email) requestedEmail = body.email;
-      } catch {
-        // ignore
+      const contentLength = Number(req.headers.get('content-length') || 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_SYNC_BODY_BYTES) {
+        return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+      }
+      const rawBody = await readBoundedBody(req);
+      if (rawBody === null) {
+        return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+      }
+      if (rawBody) {
+        let body: unknown;
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          return NextResponse.json({ error: 'Malformed request JSON.' }, { status: 400 });
+        }
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return NextResponse.json({ error: 'A request object is required.' }, { status: 400 });
+        }
+        const candidate = (body as Record<string, unknown>).userId || (body as Record<string, unknown>).id;
+        if (candidate !== undefined) requestedUserId = candidate;
       }
     }
 
-    let targetUserId = sessionUser.id;
-    let targetEmail: string | null = null;
+    const targetUserId = requestedUserId === null || requestedUserId === undefined || requestedUserId === ''
+      ? sessionUser.id
+      : requestedUserId;
 
-    const isTargetingDifferentUser =
-      (requestedUserId && requestedUserId !== sessionUser.id) ||
-      (requestedEmail && sessionUser.email && requestedEmail.toLowerCase() !== sessionUser.email.toLowerCase());
+    if (typeof targetUserId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId)) {
+      return NextResponse.json({ error: 'Invalid user ID.' }, { status: 400 });
+    }
 
-    if (isTargetingDifferentUser) {
+    if (targetUserId !== sessionUser.id) {
       const adminAuth = await verifyServerAdmin(req);
       if (!adminAuth.authorized) {
-        return NextResponse.json(
-          { error: 'Forbidden: Cannot sync KYC status of another user without administrator privileges.' },
-          { status: 403 }
-        );
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-      if (requestedUserId) targetUserId = requestedUserId;
-      if (requestedEmail) targetEmail = requestedEmail;
     }
 
-    // Fetch user profile by ID or email
-    let profileQuery = admin.from('profiles').select('*');
-    if (targetUserId) {
-      profileQuery = profileQuery.eq('id', targetUserId);
-    } else if (targetEmail) {
-      profileQuery = profileQuery.eq('email', targetEmail);
+    const { data: profile, error: profileError } = await admin
+      .from('profiles')
+      .select('id, kyc_status, is_verified, id_verified, kyc_submitted_at, kyc_last_attempt_at, didit_session_id, kyc_vendor_session_id')
+      .eq('id', targetUserId)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      console.error('[KYC SYNC] Profile lookup failed', { code: profileError?.code || null });
+      return NextResponse.json({ error: 'Profile not found.' }, { status: 404 });
     }
 
-    const { data: profile, error: profErr } = await profileQuery.maybeSingle();
+    const storedStatus = typeof profile.kyc_status === 'string'
+      ? profile.kyc_status.trim().toLowerCase()
+      : 'not_started';
+    const isVerified = ['approved', 'verified'].includes(storedStatus)
+      && profile.is_verified === true
+      && profile.id_verified === true;
 
-    if (profErr || !profile) {
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-    }
+    const sessionId = profile.didit_session_id || profile.kyc_vendor_session_id || null;
+    let providerStatus: string | null = null;
+    let providerCheck: 'not_configured' | 'unavailable' | 'checked' = 'not_configured';
 
-    targetUserId = profile.id;
-
-    const currentStatus = (profile.kyc_status || 'NOT_STARTED').toLowerCase();
-
-    // Sanitize any residual legacy verification flags if user is not approved/verified
-    if ((profile.is_verified || profile.id_verified) && currentStatus !== 'approved' && currentStatus !== 'verified') {
-      await admin.from('profiles').update({
-        is_verified: false,
-        id_verified: false,
-        updated_at: new Date().toISOString(),
-      }).eq('id', targetUserId);
-      profile.is_verified = false;
-      profile.id_verified = false;
-    }
-
-    // If already verified/approved in canonical state, return confirmed status
-    if (currentStatus === 'approved' || currentStatus === 'verified') {
-      return NextResponse.json({
-        success: true,
-        is_verified: true,
-        id_verified: true,
-        kyc_status: 'approved',
-        status: 'approved',
-        profile: {
-          ...profile,
-          kyc_status: 'approved',
-          id_verified: true,
-          is_verified: true,
-          is_kyc_locked: true,
-        },
-      });
-    }
-
-    // Check 24-hour timeout for stuck "in_review" / "pending"
-    const isUnderReview = ['in_review', 'pending', 'pending_review', 'submitted', 'under_review'].includes(currentStatus);
-    const submittedAt = profile.kyc_submitted_at || profile.kyc_last_attempt_at || profile.updated_at;
-    const hoursSinceSubmission = submittedAt ? (Date.now() - new Date(submittedAt).getTime()) / (1000 * 60 * 60) : 0;
-
-    const apiKey = process.env.DIDIT_API_KEY;
+    const apiKey = process.env.DIDIT_API_KEY?.trim();
     const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
     const diditBase = rawBaseUrl.replace(/\/+$/, '');
-    const sessionId = profile.didit_session_id || profile.kyc_vendor_session_id;
 
-    // If we have API key and session ID, query verification provider
-    let diditResult: any = null;
-    if (apiKey && sessionId) {
+    if (apiKey && typeof sessionId === 'string' && sessionId.length > 0 && sessionId.length <= 512) {
+      providerCheck = 'unavailable';
       try {
-        // 1. Try decision endpoint
-        const decisionRes = await fetch(`${diditBase}/session/${sessionId}/decision/`, {
-          headers: {
-            'x-api-key': apiKey,
-            'Accept': 'application/json',
-          },
-          cache: 'no-store',
-        });
-
-        if (decisionRes.ok) {
-          diditResult = await decisionRes.json();
-        } else {
-          // 2. Try session endpoint
-          const sessionRes = await fetch(`${diditBase}/session/${sessionId}/`, {
-            headers: {
-              'x-api-key': apiKey,
-              'Accept': 'application/json',
-            },
+        const decisionRes = await fetch(
+          `${diditBase}/session/${encodeURIComponent(sessionId)}/decision/`,
+          {
+            headers: { 'x-api-key': apiKey, Accept: 'application/json' },
             cache: 'no-store',
-          });
-          if (sessionRes.ok) {
-            diditResult = await sessionRes.json();
+            signal: AbortSignal.timeout(10_000),
           }
-        }
-      } catch (apiErr) {
-        console.warn('KYC sync provider fetch warning:', apiErr);
-      }
-    }
+        );
 
-    // Process provider decision
-    if (diditResult) {
-      const decisionObj = diditResult.decision || diditResult;
-      const statusStr = String(decisionObj.status || diditResult.status || '').toLowerCase();
-      const idVerifications = decisionObj.id_verifications || diditResult.id_verifications || [];
-      const primaryId = Array.isArray(idVerifications) && idVerifications.length > 0 ? idVerifications[0] : null;
-
-      const isApproved = statusStr === 'approved' || statusStr === 'passed' || (primaryId && isApprovedText(primaryId.status));
-      const isDeclined = statusStr === 'declined' || statusStr === 'rejected' || statusStr === 'failed';
-
-      if (isApproved) {
-        // Extract KYC data
-        const extractedFirstName = primaryId?.first_name || decisionObj.first_name || '';
-        const extractedLastName = primaryId?.last_name || decisionObj.last_name || '';
-        const extractedFullName = (primaryId?.full_name || `${extractedFirstName} ${extractedLastName}` || profile.full_name || '').trim();
-        const extractedDob = primaryId?.date_of_birth || primaryId?.dob || decisionObj.date_of_birth || profile.dob || profile.date_of_birth;
-        const extractedCountry = primaryId?.issuing_country || primaryId?.country || decisionObj.country || profile.country;
-        const documentNumber = primaryId?.document_number || primaryId?.id_number || decisionObj.document_number;
-
-        let extractedAddress = primaryId?.address || primaryId?.formatted_address || decisionObj.address || decisionObj.formatted_address;
-        if (typeof extractedAddress === 'object' && extractedAddress !== null) {
-          extractedAddress = [
-            extractedAddress.street_line_1 || extractedAddress.street,
-            extractedAddress.city,
-            extractedAddress.state || extractedAddress.province,
-            extractedAddress.postal_code || extractedAddress.zip_code,
-            extractedAddress.country,
-          ].filter(Boolean).join(', ');
+        let providerResult: unknown = null;
+        if (decisionRes.ok) {
+          providerResult = await decisionRes.json();
+        } else if (decisionRes.status === 404 || decisionRes.status === 405) {
+          const sessionRes = await fetch(
+            `${diditBase}/session/${encodeURIComponent(sessionId)}/`,
+            {
+              headers: { 'x-api-key': apiKey, Accept: 'application/json' },
+              cache: 'no-store',
+              signal: AbortSignal.timeout(10_000),
+            }
+          );
+          if (sessionRes.ok) providerResult = await sessionRes.json();
         }
 
-        const updatePayload: Record<string, any> = {
-          kyc_status: 'approved',
-          is_verified: true,
-          id_verified: true,
-          is_kyc_locked: true,
-          kyc_approved_at: new Date().toISOString(),
-          kyc_retry_count: 0,
-          kyc_attempts: 0,
-          updated_at: new Date().toISOString(),
-        };
-
-        if (extractedFullName) {
-          updatePayload.full_name = extractedFullName;
+        if (providerResult && typeof providerResult === 'object' && !Array.isArray(providerResult)) {
+          const result = providerResult as Record<string, unknown>;
+          const decision = result.decision && typeof result.decision === 'object' && !Array.isArray(result.decision)
+            ? result.decision as Record<string, unknown>
+            : result;
+          providerStatus = normalizeProviderStatus(decision.status || result.status || result.verification_status);
+          providerCheck = 'checked';
         }
-        if (extractedDob) {
-          updatePayload.dob = extractedDob;
-          updatePayload.date_of_birth = extractedDob;
-        }
-        if (extractedCountry) {
-          updatePayload.country = String(extractedCountry).toUpperCase().slice(0, 2);
-          updatePayload.is_country_locked = true;
-        }
-        if (documentNumber) {
-          updatePayload.id_document_number = documentNumber;
-        }
-        if (extractedAddress && typeof extractedAddress === 'string' && extractedAddress.trim()) {
-          updatePayload.address = extractedAddress.trim();
-          updatePayload.address_street = extractedAddress.trim();
-          updatePayload.is_address_locked = true;
-        }
-
-        await admin.from('profiles').update(updatePayload).eq('id', targetUserId);
-
-        if (sessionId) {
-          await admin.from('kyc_verifications').update({
-            status: 'APPROVED',
-            decision: diditResult,
-            updated_at: new Date().toISOString(),
-          }).eq('session_id', sessionId);
-        }
-
-        return NextResponse.json({
-          success: true,
-          is_verified: true,
-          id_verified: true,
-          kyc_status: 'approved',
-          status: 'approved',
-          profile: {
-            ...profile,
-            ...updatePayload,
-          },
-        });
-      } else if (isDeclined) {
-        const attempts = (profile.kyc_retry_count || profile.kyc_attempts || 0) + 1;
-        const newStatus = attempts >= 3 ? 'permanently_rejected' : 'declined';
-
-        await admin.from('profiles').update({
-          kyc_status: newStatus,
-          is_verified: false,
-          id_verified: false,
-          kyc_retry_count: attempts,
-          kyc_attempts: attempts,
-          updated_at: new Date().toISOString(),
-        }).eq('id', targetUserId);
-
-        return NextResponse.json({
-          success: true,
-          is_verified: false,
-          id_verified: false,
-          kyc_status: newStatus,
-          status: newStatus,
-          attempts,
+      } catch (providerError) {
+        console.warn('[KYC SYNC] Provider status lookup unavailable', {
+          error: providerError instanceof Error ? providerError.name : 'UnknownError',
         });
       }
     }
 
-    // If 24 hours have passed without decision and it is in_review, clear review status to allow restart
-    if (isUnderReview && hoursSinceSubmission >= 24) {
-      await admin.from('profiles').update({
-        kyc_status: 'not_started',
-        is_verified: false,
-        id_verified: false,
-        didit_session_id: null,
-        kyc_vendor_session_id: null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', targetUserId);
-
-      return NextResponse.json({
-        success: true,
-        is_verified: false,
-        id_verified: false,
-        kyc_status: 'not_started',
-        status: 'not_started',
-        message: 'Review period expired after 24 hours. Verification form reset.',
-      });
-    }
+    const submittedAt = profile.kyc_submitted_at || profile.kyc_last_attempt_at;
+    const submittedMs = submittedAt ? new Date(submittedAt).getTime() : NaN;
+    const hoursSinceSubmission = Number.isFinite(submittedMs)
+      ? Math.max(0, (Date.now() - submittedMs) / (1000 * 60 * 60))
+      : null;
+    const providerTerminal = providerStatus !== null && [
+      'approved', 'passed', 'completed', 'declined', 'rejected', 'failed',
+      'resubmitted', 'resubmit_required', 'expired', 'abandoned',
+    ].includes(providerStatus);
 
     return NextResponse.json({
       success: true,
-      is_verified: false,
-      id_verified: false,
-      kyc_status: profile.kyc_status || 'NOT_STARTED',
-      status: profile.kyc_status || 'NOT_STARTED',
-      hoursSinceSubmission: Math.round(hoursSinceSubmission * 10) / 10,
+      is_verified: isVerified,
+      id_verified: isVerified,
+      kyc_status: isVerified ? 'approved' : (profile.kyc_status || 'NOT_STARTED'),
+      status: isVerified ? 'approved' : (profile.kyc_status || 'NOT_STARTED'),
+      provider_status: providerStatus,
+      provider_check: providerCheck,
+      awaiting_webhook: !isVerified && providerTerminal,
+      hoursSinceSubmission: hoursSinceSubmission === null
+        ? null
+        : Math.round(hoursSinceSubmission * 10) / 10,
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+        'Vary': 'Authorization, Cookie',
+      },
     });
-  } catch (err: any) {
-    console.error('KYC sync error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to sync KYC status' }, { status: 500 });
+  } catch (error) {
+    console.error('[KYC SYNC] Read-only status check failed', {
+      error: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return NextResponse.json({ error: 'Unable to check verification status.' }, { status: 500 });
   }
 }

@@ -1,7 +1,4 @@
 import type { Trade, Dispute } from './types';
-import { supabase as clientSupabase } from '@/lib/supabase/client';
-import { createClient as createServerClient } from '@/lib/supabase/server';
-import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export interface OpenDisputeParams {
   tradeId: string;
@@ -73,50 +70,24 @@ export async function openDispute(
     explanation = arg6 || '';
   }
 
-  // Determine server or client context
-  const isServer = typeof window === 'undefined';
-  const fullReason = explanation ? `${reason}: ${explanation}` : reason;
-
-  if (!isServer) {
-    // 1. Client context: dispatch through secure canonical API route
-    const res = await fetch(`/api/trades/${tradeId}/dispute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: fullReason }),
-    });
-
-    const resData = await res.json().catch(() => ({}));
-    if (!res.ok || resData.error) {
-      throw new Error(resData.error || 'Failed to open dispute.');
-    }
-    return;
+  // Dispute creation is always performed through the authenticated canonical
+  // API route. Keeping the server-role client out of this shared library is
+  // essential because wallet.ts imports it into client bundles.
+  if (typeof window === 'undefined') {
+    throw new Error('openDispute must be invoked from an authenticated client context.');
   }
 
-  // 2. Server context: execute canonical atomic RPC
-  const supabase = await createServerClient();
-  const { data: rpcData, error: rpcError } = await supabase.rpc('raise_trade_dispute', {
-    p_trade_id: tradeId,
-    p_user_id: openerId || null,
-    p_reason: fullReason,
+  const fullReason = explanation ? `${reason}: ${explanation}` : reason;
+  const routeTradeId = tradePublicId || tradeId;
+  const res = await fetch(`/api/trades/${encodeURIComponent(routeTradeId)}/dispute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ reason: fullReason }),
   });
 
-  if (rpcError || (rpcData && !rpcData.success)) {
-    throw new Error(rpcError?.message || rpcData?.message || 'Failed to raise dispute via canonical RPC.');
+  const resData = await res.json().catch(() => ({}));
+  if (!res.ok || resData.error) {
+    throw new Error(resData.error || 'Failed to open dispute.');
   }
-
-  try {
-    const { data: tradeData } = await supabase.from('trades').select('buyer_id, seller_id').eq('id', tradeId).maybeSingle();
-    const pIds = [tradeData?.buyer_id, tradeData?.seller_id].filter(Boolean);
-    for (const pid of pIds) {
-      await supabase.from('notifications').insert({
-        user_id: pid,
-        title: 'Trade Disputed',
-        message: `Dispute opened for trade: ${fullReason}`,
-        type: 'dispute',
-        is_read: false,
-        metadata: { link: `/trade/${tradeId}` },
-        created_at: new Date().toISOString(),
-      });
-    }
-  } catch (_) {}
 }

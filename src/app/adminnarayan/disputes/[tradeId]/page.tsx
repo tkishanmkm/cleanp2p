@@ -24,10 +24,24 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 
+function normalizeLegacyBrandDisplay(value: unknown): string {
+  const legacyBrand = String.fromCharCode(80, 97, 120, 111, 110, 101, 115);
+  return String(value ?? '').replace(new RegExp(legacyBrand, 'gi'), 'Wayones');
+}
+
+function normalizeLegacyBrandMessage(message: any): any {
+  if (!message || typeof message !== 'object') return message;
+  return {
+    ...message,
+    message: normalizeLegacyBrandDisplay(message.message),
+    sender_username: normalizeLegacyBrandDisplay(message.sender_username),
+  };
+}
+
 export default function AdminDisputeModeratorPage({
   params,
 }: {
-  params?: Promise<{ tradeId: string }> | { tradeId: string };
+  params?: Promise<{ tradeId: string }>;
 }) {
   const router = useRouter();
   const routeParams = useParams();
@@ -74,14 +88,15 @@ export default function AdminDisputeModeratorPage({
       const data = await res.json();
       if (data.success && data.trade) {
         setTrade(data.trade);
-        setMessages(data.messages || []);
+        const normalizedMessages = (data.messages || []).map(normalizeLegacyBrandMessage);
+        setMessages(normalizedMessages);
         if (data.hasModeratorJoined) {
           setHasJoined(true);
         } else {
-          const alreadyJoined = (data.messages || []).some(
+          const alreadyJoined = normalizedMessages.some(
             (m: any) =>
-              m.message === "Paxones Moderator joined the trade chat." ||
-              (typeof m.message === "string" && m.message.includes("Paxones Moderator joined"))
+              m.message === "Wayones Moderator joined the trade chat." ||
+              (typeof m.message === "string" && m.message.includes("Wayones Moderator joined"))
           );
           if (alreadyJoined) setHasJoined(true);
         }
@@ -109,11 +124,12 @@ export default function AdminDisputeModeratorPage({
         },
         (payload) => {
           if (payload.new) {
+            const normalizedMessage = normalizeLegacyBrandMessage(payload.new);
             setMessages((prev) => {
-              if (prev.some((m) => m.id === payload.new.id)) return prev;
-              return [...prev, payload.new];
+              if (prev.some((m) => m.id === normalizedMessage.id)) return prev;
+              return [...prev, normalizedMessage];
             });
-            if (payload.new.message?.includes("Paxones Moderator joined")) {
+            if (normalizedMessage.message?.includes("Wayones Moderator joined")) {
               setHasJoined(true);
             }
           }
@@ -133,11 +149,12 @@ export default function AdminDisputeModeratorPage({
         },
         (payload) => {
           if (payload.new) {
+            const normalizedMessage = normalizeLegacyBrandMessage(payload.new);
             setMessages((prev) => {
-              if (prev.some((m) => m.id === payload.new.id)) return prev;
-              return [...prev, payload.new];
+              if (prev.some((m) => m.id === normalizedMessage.id)) return prev;
+              return [...prev, normalizedMessage];
             });
-            if (payload.new.message?.includes("Paxones Moderator joined")) {
+            if (normalizedMessage.message?.includes("Wayones Moderator joined")) {
               setHasJoined(true);
             }
           }
@@ -178,7 +195,7 @@ export default function AdminDisputeModeratorPage({
         type: "success",
         message: data.alreadyJoined
           ? "Moderator already active in this dispute room."
-          : "Paxones Moderator joined the trade chat successfully.",
+          : "Wayones Moderator joined the trade chat successfully.",
       });
       await fetchTradeAndChat();
     } catch (err: any) {
@@ -229,19 +246,26 @@ export default function AdminDisputeModeratorPage({
     setFeedback(null);
 
     try {
-      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+      const disputeId = typeof trade?.dispute?.id === "string" ? trade.dispute.id : "";
+      const internalTradeId = typeof trade?.id === "string" ? trade.id : "";
+      if (!disputeId || !internalTradeId) {
+        throw new Error("The open dispute could not be verified. Refresh the trade before resolving it.");
+      }
+
+      const res = await fetch("/api/admin/disputes/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "intervene",
-          interveneAction: resolveModal.action,
+          disputeId,
+          tradeId: internalTradeId,
+          resolution: resolveModal.action === "release" ? "RELEASE" : "CANCEL",
           reason: resolutionReason.trim(),
         }),
       });
 
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to execute dispute resolution settlement.");
+      if (!res.ok || data.success !== true || data.settlementSucceeded !== true || data.audit_logged !== true) {
+        throw new Error(data.error || "Atomic dispute settlement and audit were not confirmed.");
       }
 
       setFeedback({
@@ -304,7 +328,7 @@ export default function AdminDisputeModeratorPage({
           {hasJoined ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-950/70 border border-emerald-700/80 text-emerald-300 shadow-sm">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              PAXONES MODERATOR ACTIVE
+              Wayones MODERATOR ACTIVE
             </span>
           ) : (
             <button
@@ -449,23 +473,23 @@ export default function AdminDisputeModeratorPage({
             </div>
           ) : (
             messages.map((m: any, idx: number) => {
-              const text = String(m.message || "");
+              const text = normalizeLegacyBrandDisplay(m.message || "");
               const isJoinMessage =
-                text === "Paxones Moderator joined the trade chat." ||
-                text.includes("Paxones Moderator joined");
+                text === "Wayones Moderator joined the trade chat." ||
+                text.includes("Wayones Moderator joined");
               const isSystem =
                 m.is_system_message ||
                 m.sender_id === "00000000-0000-0000-0000-000000000000" ||
-                m.sender_username === "Paxones System" ||
+                m.sender_username === "Wayones System" ||
                 isJoinMessage ||
                 text.startsWith("[SYSTEM]") ||
-                text.includes("PAXONES ESCROW");
+                text.includes("Wayones ESCROW");
 
               const isModeratorMsg =
                 !isJoinMessage &&
                 (m.is_moderator ||
-                  m.sender_username === "Paxones Moderator" ||
-                  text.startsWith("Paxones Moderator\n"));
+                  m.sender_username === "Wayones Moderator" ||
+                  text.startsWith("Wayones Moderator\n"));
 
               const isBuyer = m.sender_id === trade?.buyer_id;
               const isSeller = m.sender_id === trade?.seller_id;
@@ -483,7 +507,7 @@ export default function AdminDisputeModeratorPage({
                   >
                     <div className="flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
                       <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
-                      <span>{isJoinMessage ? "PAXONES MODERATION EVENT" : "PAXONES SYSTEM NOTICE"}</span>
+                      <span>{isJoinMessage ? "Wayones MODERATION EVENT" : "Wayones SYSTEM NOTICE"}</span>
                     </div>
                     <p className="font-semibold text-white whitespace-pre-wrap">{text}</p>
                     <p className="text-[10px] text-slate-400 font-mono pt-1">
@@ -501,14 +525,14 @@ export default function AdminDisputeModeratorPage({
                       <div className="flex items-center justify-between gap-3 border-b border-amber-700/40 pb-1">
                         <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
                           <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                          Paxones Moderator
+                          Wayones Moderator
                         </span>
                         <span className="text-[10px] font-mono text-amber-400/80">
                           {m.created_at ? new Date(m.created_at).toLocaleTimeString() : ""}
                         </span>
                       </div>
                       <p className="text-xs whitespace-pre-wrap leading-relaxed text-white pt-1">
-                        {text.replace(/^Paxones Moderator\n+/, "")}
+                        {text.replace(/^Wayones Moderator\n+/, "")}
                       </p>
                     </div>
                   </div>
@@ -553,7 +577,7 @@ export default function AdminDisputeModeratorPage({
               type="text"
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type message to buyer and seller as Paxones Moderator..."
+              placeholder="Type message to buyer and seller as Wayones Moderator..."
               disabled={isSending}
               className="flex-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
@@ -567,7 +591,7 @@ export default function AdminDisputeModeratorPage({
             </button>
           </form>
           <div className="flex justify-between items-center px-1 pt-1.5 text-[10px] text-slate-500">
-            <span>Posted as <strong className="text-amber-400">Paxones Moderator</strong></span>
+            <span>Posted as <strong className="text-amber-400">Wayones Moderator</strong></span>
             <span>Visible to Buyer, Seller &amp; Audit Trail</span>
           </div>
         </div>
@@ -592,7 +616,7 @@ export default function AdminDisputeModeratorPage({
                 Joining this trade will broadcast an official system message to both buyer (<strong className="text-blue-400">@{buyerName}</strong>) and seller (<strong className="text-emerald-400">@{sellerName}</strong>):
               </p>
               <p className="p-2.5 rounded bg-purple-950/40 border border-purple-800/60 font-semibold text-purple-200 text-center">
-                &ldquo;Paxones Moderator joined the trade chat.&rdquo;
+                &ldquo;Wayones Moderator joined the trade chat.&rdquo;
               </p>
               <p className="text-[11px] text-slate-400">
                 Your presence will be logged in the admin audit history.

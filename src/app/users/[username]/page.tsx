@@ -5,7 +5,7 @@ import UserProfileClient from './UserProfileClient';
 import { getIdentityVerificationState } from '@/utils/userPrivacy';
 
 interface PageProps {
-  params: Promise<{ username: string }> | { username: string };
+  params: Promise<{ username: string }>;
 }
 
 export const dynamic = 'force-dynamic';
@@ -19,9 +19,10 @@ export default async function UserProfilePage({ params }: PageProps) {
   const supabase = getSupabaseAdminClient();
   const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(username);
 
-  // 1. Fetch Target Profile
-  const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
-  let profileQuery = supabase.from('profiles').select(PUBLIC_PROFILE_COLUMNS);
+  // 1. Fetch only the reviewed public trader projection. Never read private
+  // profile columns through the service-role client for a public profile route.
+  const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, created_at, total_completed_trades, completed_trades, trade_volume, total_volume_usd, total_traded_usd, positive_feedback, negative_feedback, feedback_score, merchant_tier, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, is_trading_eligible';
+  let profileQuery = supabase.from('public_profiles').select(PUBLIC_PROFILE_COLUMNS);
   if (isUuid) {
     profileQuery = profileQuery.or(`id.eq.${username},username.ilike.${username}`);
   } else {
@@ -34,6 +35,10 @@ export default async function UserProfilePage({ params }: PageProps) {
     return notFound();
   }
 
+  // Trading eligibility is precomputed inside the restricted SQL view from
+  // the authoritative account flags. A missing value fails closed.
+  const hidePublicAds = profile.is_trading_eligible !== true;
+
   // 2. Fetch Active Ads listed by this user (both buy & sell)
   let userAds: any[] = [];
   try {
@@ -42,7 +47,9 @@ export default async function UserProfilePage({ params }: PageProps) {
       .select('*')
       .eq('user_id', profile.id)
       .neq('status', 'DELETED')
-      .order('created_at', { ascending: false });
+      .or('active.eq.true,is_active.eq.true,status.eq.active,status.eq.published')
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (!adsError && Array.isArray(adsData)) {
       userAds = adsData;
@@ -53,7 +60,9 @@ export default async function UserProfilePage({ params }: PageProps) {
         .select('*')
         .eq('user_id', profile.id)
         .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
+        .or('active.eq.true,is_active.eq.true,status.eq.active,status.eq.published')
+        .order('created_at', { ascending: false })
+        .limit(20);
       if (Array.isArray(p2pAdsData)) {
         userAds = p2pAdsData;
       }
@@ -62,70 +71,46 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Error querying user ads:', err);
   }
 
-  // Fetch user's crypto balances for precise limit clamping
-  let userCryptoBalances: Record<string, number> = {
-    BTC: Number(profile.btc_balance || 0),
-    ETH: Number(profile.eth_balance || 0),
-    LTC: Number(profile.ltc_balance || 0),
-    USDT: Number(profile.usdt_balance || 0),
-    SOL: Number(profile.sol_balance || 0),
-  };
+  // A public profile must never query or serialize live wallet balances.
+  // The published ad limits remain informational; the escrow RPC performs the
+  // authoritative concurrent inventory check when a trade is initiated.
 
-  try {
-    const { data: userWallets } = await supabase
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (userWallets && userWallets.length > 0) {
-      userWallets.forEach((w: any) => {
-        const sym = (w.asset_symbol || w.symbol || w.crypto || '').toUpperCase();
-        const bal = Number(w.available_balance ?? w.available ?? w.balance ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-
-    const { data: walletAssets } = await supabase
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (walletAssets && walletAssets.length > 0) {
-      walletAssets.forEach((a: any) => {
-        const sym = (a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        const bal = Number(a.available ?? a.balance ?? a.amount ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('Error querying wallet balances:', err);
-  }
+  // Keep the profile page visible as a tombstone, but never display ads for accounts
+  // that the public projection marks as ineligible to trade.
+  if (hidePublicAds) userAds = [];
 
   // Filter ads from visitor perspective and attach available crypto:
   // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
   const buyAds = userAds
     .filter((ad) => {
       const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      const adStatus = String(ad.status || '').toUpperCase();
+      const hasActiveFlags = ad.is_active != null || ad.active != null;
+      const isActive =
+        !['INACTIVE', 'PAUSED', 'DELETED', 'SUSPENDED'].includes(adStatus) &&
+        (hasActiveFlags
+          ? ad.is_active === true || ad.active === true
+          : ['ACTIVE', 'PUBLISHED'].includes(adStatus));
       return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
     })
-    .map((ad) => {
-      const sym = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
-      return {
-        ...ad,
-        available_crypto: userCryptoBalances[sym] ?? -1,
-      };
-    });
+    .map((ad) => ({
+      ...ad,
+      // Use only the public inventory declared by this advertisement. Never
+      // query or serialize the seller's live account wallet balance here.
+      available_crypto: Number(ad.available_amount ?? ad.total_amount ?? -1),
+    }));
 
   // 2. If advertiser created a 'BUY' ad, the visitor SELLs crypto to advertiser -> "Sell Ads" tab
   const sellAds = userAds
     .filter((ad) => {
       const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      const adStatus = String(ad.status || '').toUpperCase();
+      const hasActiveFlags = ad.is_active != null || ad.active != null;
+      const isActive =
+        !['INACTIVE', 'PAUSED', 'DELETED', 'SUSPENDED'].includes(adStatus) &&
+        (hasActiveFlags
+          ? ad.is_active === true || ad.active === true
+          : ['ACTIVE', 'PUBLISHED'].includes(adStatus));
       return (type === 'BUY' || type === 'ONLINE_BUY') && isActive;
     })
     .map((ad) => ({
@@ -134,9 +119,9 @@ export default async function UserProfilePage({ params }: PageProps) {
 
   // 3. Aggregate Real Trade Stats & Dynamic Averages from trades table
   let completedTradeCount = Number(profile.completed_trades || 0);
-  let totalVolumeUSD = Number(profile.total_trade_volume_usd || profile.trade_volume || profile.total_volume || 0);
-  let avgPayTimeSeconds = profile.avg_pay_time_seconds ?? null;
-  let avgReleaseTimeSeconds = profile.avg_release_time_seconds ?? null;
+  let totalVolumeUSD = Number(profile.trade_volume ?? profile.total_volume_usd ?? profile.total_traded_usd ?? 0);
+  let avgPayTimeSeconds: number | null = null;
+  let avgReleaseTimeSeconds: number | null = null;
 
   try {
     const { data: userTrades } = await supabase
@@ -228,7 +213,7 @@ export default async function UserProfilePage({ params }: PageProps) {
       let reviewerProfilesMap = new Map<string, any>();
       if (reviewerIds.length > 0) {
         const { data: revProfiles } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('id, username, avatar_url, photo_url')
           .in('id', reviewerIds);
         if (revProfiles) {
@@ -269,7 +254,7 @@ export default async function UserProfilePage({ params }: PageProps) {
       let revieweeProfilesMap = new Map<string, any>();
       if (revieweeIds.length > 0) {
         const { data: targetProfiles } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('id, username, avatar_url, photo_url')
           .in('id', revieweeIds);
         if (targetProfiles) {
@@ -307,31 +292,25 @@ export default async function UserProfilePage({ params }: PageProps) {
   const totalFeedbackCount = receivedFeedbacks.length;
   const positiveRatio = totalFeedbackCount > 0 ? ((positiveFeedbacksCount / totalFeedbackCount) * 100).toFixed(0) : '100';
 
-  // 6. Verification Statuses
-  const isEmailVerified = Boolean(
-    profile.is_email_verified ||
-    profile.email_verified ||
-    profile.email_confirmed_at ||
-    (profile.email && !profile.email.includes('placeholder'))
-  );
-
-  const verification = getIdentityVerificationState(profile);
-  const countryCode = (profile.country || profile.country_code || 'US').toUpperCase();
+  // Publicly expose only the verified/unverified badge. Pending KYC status,
+  // provider details and internal verification tier remain private.
+  const verification = getIdentityVerificationState({ is_verified: profile.is_verified === true });
+  const countryCode = (profile.country || 'US').toUpperCase();
 
   return (
     <UserProfileClient
       profile={{
-        ...profile,
-        last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        is_online: profile.is_online ?? false,
+        id: profile.id,
         username: profile.username || username,
-        is_email_verified: isEmailVerified,
-        is_id_verified: verification.isVerified,
-        kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
-        verification_tier: verification.tier,
+        display_name: profile.display_name || null,
+        avatar_url: profile.avatar_url || profile.photo_url || null,
+        photo_url: profile.photo_url || profile.avatar_url || null,
         country: countryCode,
+        created_at: profile.created_at || null,
+        is_online: profile.is_online ?? false,
+        merchant_tier: profile.merchant_tier || null,
+        is_trading_eligible: !hidePublicAds,
+        is_id_verified: verification.isVerified,
       }}
       buyAds={buyAds}
       sellAds={sellAds}
@@ -346,8 +325,8 @@ export default async function UserProfilePage({ params }: PageProps) {
         negativeFeedbacksCount,
         positiveRatio,
         totalFeedbackCount,
-        blockedBy: Number(profile.blocked_by_count || 0),
-        hasBlocked: Number(profile.blocking_count || 0),
+        blockedBy: 0,
+        hasBlocked: 0,
       }}
     />
   );

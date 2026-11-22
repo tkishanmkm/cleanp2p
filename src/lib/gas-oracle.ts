@@ -1,6 +1,3 @@
-import { supabase } from '@/lib/supabase/client';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-
 export interface NetworkGasFee {
   id?: string;
   crypto: string;
@@ -24,15 +21,20 @@ async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
 
   // 1. Check live crypto_market_prices table in database
   try {
-    const { data } = await supabase
+    const { getBrowserClient } = await import('@/lib/supabaseClient');
+    const browserSupabase = getBrowserClient();
+    const { data } = await browserSupabase
       .from('crypto_market_prices')
-      .select('price_in_fiat')
+      .select('price_in_fiat, updated_at')
       .eq('asset_symbol', asset)
       .eq('fiat_symbol', 'USD')
       .maybeSingle();
 
-    if (data && typeof data.price_in_fiat === 'number' && data.price_in_fiat > 0) {
-      return data.price_in_fiat;
+    const price = Number(data?.price_in_fiat);
+    const updatedAt = data?.updated_at ? Date.parse(data.updated_at) : NaN;
+    const ageMs = Date.now() - updatedAt;
+    if (Number.isFinite(price) && price > 0 && Number.isFinite(updatedAt) && ageMs >= -60_000 && ageMs <= 10 * 60_000) {
+      return price;
     }
   } catch {}
 
@@ -79,7 +81,9 @@ async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
     }
   } catch {}
 
-  return 1.0;
+  // Never substitute a $1 price for a volatile asset when every price
+  // provider failed: that can materially understate or distort fee quotes.
+  throw new Error(`Unable to determine a reliable USD price for ${asset}.`);
 }
 
 /**
@@ -244,9 +248,10 @@ async function estimateLtcGasFees(
 }
 
 /**
- * Queries all supported networks and upserts cached live gas fees into network_gas_fees table.
+ * Computes all supported network gas estimates without performing privileged writes.
+ * This module is also imported by client UI; never place service-role logic here.
  */
-export async function fetchAndCacheNetworkGasFees(): Promise<NetworkGasFee[]> {
+export async function fetchNetworkGasFeeEstimates(): Promise<NetworkGasFee[]> {
   const networksToQuery = [
     { crypto: 'BTC', network: 'BTC' },
     { crypto: 'ETH', network: 'ETH' },
@@ -279,30 +284,8 @@ export async function fetchAndCacheNetworkGasFees(): Promise<NetworkGasFee[]> {
     }
   }
 
-  // Upsert to Supabase Client
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-    const clientToUse = process.env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseClient(supabaseUrl, supabaseKey) : supabase;
-    for (const record of results) {
-      const id = `${record.crypto.toLowerCase()}_${record.network.toLowerCase()}`;
-      await clientToUse.from('network_gas_fees').upsert(
-        {
-          id,
-          crypto: record.crypto,
-          network: record.network,
-          base_fee_gwei: record.base_fee_gwei,
-          priority_fee_gwei: record.priority_fee_gwei,
-          sat_per_vbyte: record.sat_per_vbyte,
-          estimated_fee_native: record.estimated_fee_native,
-          estimated_fee_usd: record.estimated_fee_usd,
-          updated_at: record.updated_at,
-        },
-        { onConflict: 'id' }
-      );
-    }
-  } catch (dbErr) {
-    console.error('Failed to upsert network_gas_fees:', dbErr);
+  if (results.length !== networksToQuery.length) {
+    throw new Error(`Gas fee refresh incomplete: estimated ${results.length} of ${networksToQuery.length} supported asset/network pairs.`);
   }
 
   return results;
@@ -320,13 +303,17 @@ export async function getCachedGasFees(
   const id = `${asset.toLowerCase()}_${net.toLowerCase()}`;
 
   try {
-    const { data, error } = await supabase
+    const { getBrowserClient } = await import('@/lib/supabaseClient');
+    const browserSupabase = getBrowserClient();
+    const { data, error } = await browserSupabase
       .from('network_gas_fees')
       .select('*')
       .eq('id', id)
       .maybeSingle();
 
-    if (!error && data) {
+    const updatedAt = data?.updated_at ? Date.parse(data.updated_at) : NaN;
+    const ageMs = Date.now() - updatedAt;
+    if (!error && data && Number.isFinite(updatedAt) && ageMs >= -60_000 && ageMs <= 2 * 60_000) {
       return data as NetworkGasFee;
     }
   } catch {

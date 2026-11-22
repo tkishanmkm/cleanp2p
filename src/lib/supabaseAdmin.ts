@@ -1,3 +1,4 @@
+import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let _cachedClient: SupabaseClient | null = null;
@@ -9,7 +10,18 @@ let _cachedClient: SupabaseClient | null = null;
  */
 export function getAuthoritativeAdminClient(): SupabaseClient {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === 'placeholder-anon-key') {
+  const publicAnonKey = (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+  if (
+    !serviceKey ||
+    serviceKey === 'placeholder-key' ||
+    serviceKey === 'placeholder-anon-key' ||
+    serviceKey.length < 20 ||
+    (publicAnonKey && serviceKey === publicAnonKey)
+  ) {
     throw new Error(
       'SUPABASE_SERVICE_ROLE_KEY is required for supabaseAdmin but is missing or not configured.'
     );
@@ -19,7 +31,11 @@ export function getAuthoritativeAdminClient(): SupabaseClient {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
       process.env.SUPABASE_URL?.trim() ||
-      'https://placeholder.supabase.co';
+      '';
+
+    if (!supabaseUrl.startsWith('https://') || supabaseUrl.includes('placeholder')) {
+      throw new Error('A valid HTTPS Supabase URL is required for privileged operations.');
+    }
 
     _cachedClient = createClient(supabaseUrl, serviceKey, {
       auth: {

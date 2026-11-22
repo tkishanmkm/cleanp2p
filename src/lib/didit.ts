@@ -1,6 +1,6 @@
 export async function saveAddressAndVerifyDidit(payload: any) {
   try {
-    const res = await fetch('/api/didit/verify', {
+    const res = await fetch('/api/kyc/initiate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

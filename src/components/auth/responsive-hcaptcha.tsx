@@ -25,10 +25,7 @@ export const ResponsiveHCaptcha = forwardRef<ResponsiveHCaptchaRef, ResponsiveHC
     const [mounted, setMounted] = useState(false);
     const [scale, setScale] = useState(1);
 
-    const activeSiteKey =
-      sitekey ||
-      process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY ||
-      '35e2a6c0-e7ae-45a0-b636-b46e01a67aee';
+    const activeSiteKey = (sitekey || process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY || '').trim();
 
     const currentTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
 
@@ -77,6 +74,18 @@ export const ResponsiveHCaptcha = forwardRef<ResponsiveHCaptchaRef, ResponsiveHC
       };
     }, [mounted]);
 
+    if (!activeSiteKey) {
+      return (
+        <div
+          role="alert"
+          aria-live="polite"
+          className={'w-full max-w-[304px] min-h-[78px] flex items-center justify-center text-center text-xs text-rose-600 dark:text-rose-400 ' + className}
+        >
+          Security verification is temporarily unavailable. Please try again later.
+        </div>
+      );
+    }
+
     if (!mounted) {
       return (
         <div
@@ -89,7 +98,6 @@ export const ResponsiveHCaptcha = forwardRef<ResponsiveHCaptchaRef, ResponsiveHC
     }
 
     const scaledHeight = Math.ceil(78 * scale);
-    const scaledWidth = Math.ceil(302 * scale);
 
     return (
       <div

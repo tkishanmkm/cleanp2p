@@ -126,16 +126,17 @@ export function AdminSidebar() {
         <SidebarMenu>
           {menuItems.map((item) => (
             <SidebarMenuItem key={item.label}>
-              <Link href={item.href}>
-                <SidebarMenuButton isActive={pathname === item.href} icon={<item.icon />} tooltip={item.label}>
+              <SidebarMenuButton asChild isActive={pathname === item.href} tooltip={item.label}>
+                <Link href={item.href}>
+                  <item.icon />
                   <span className="flex-grow">{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <Badge variant="destructive" className="ml-auto">
                       {item.badge}
                     </Badge>
                   )}
-                </SidebarMenuButton>
-              </Link>
+                </Link>
+              </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
@@ -147,11 +148,12 @@ export function AdminSidebar() {
           <SidebarMenu>
             {settingsItems.map((item) => (
               <SidebarMenuItem key={item.label}>
-                <Link href={item.href}>
-                  <SidebarMenuButton isActive={pathname === item.href} icon={<item.icon />} tooltip={item.label}>
+                <SidebarMenuButton asChild isActive={pathname === item.href} tooltip={item.label}>
+                  <Link href={item.href}>
+                    <item.icon />
                     <span className="flex-grow">{item.label}</span>
-                  </SidebarMenuButton>
-                </Link>
+                  </Link>
+                </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
@@ -170,8 +172,9 @@ export function AdminSidebar() {
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton icon={<LogOut />} tooltip="Logout" onClick={handleLogout}>
-              Logout
+            <SidebarMenuButton tooltip="Logout" onClick={handleLogout}>
+              <LogOut />
+              <span>Logout</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

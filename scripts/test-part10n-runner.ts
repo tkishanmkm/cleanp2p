@@ -305,6 +305,10 @@ async function runPart10NTest() {
       .eq('id', tradeId)
       .single();
 
+    if (!releasedTrade) {
+      throw new Error('Trade record missing after successful escrow release; cannot verify final state.');
+    }
+
     // Support both RELEASED and COMPLETED statuses in any casing
     const normStatus = String(releasedTrade.status || '').toUpperCase();
     if (normStatus !== 'RELEASED' && normStatus !== 'COMPLETED') {
@@ -315,6 +319,10 @@ async function runPart10NTest() {
     // Capture initial reputation counts safely
     const { data: initialBuyerProf } = await adminSupabase.from('profiles').select('positive_feedback, negative_feedback, feedback_score').eq('id', BUYER_ID).single();
     const { data: initialSellerProf } = await adminSupabase.from('profiles').select('positive_feedback, negative_feedback, feedback_score').eq('id', SELLER_ID).single();
+
+    if (!initialBuyerProf || !initialSellerProf) {
+      throw new Error('Buyer or seller profile missing before feedback regression checks.');
+    }
 
     console.log(`  ✓ Initial Buyer Rep: Pos: ${initialBuyerProf.positive_feedback}, Neg: ${initialBuyerProf.negative_feedback}, Score: ${initialBuyerProf.feedback_score}%`);
     console.log(`  ✓ Initial Seller Rep: Pos: ${initialSellerProf.positive_feedback}, Neg: ${initialSellerProf.negative_feedback}, Score: ${initialSellerProf.feedback_score}%`);
@@ -358,6 +366,9 @@ async function runPart10NTest() {
 
     // Verify Seller profile reputation update
     const { data: updatedSellerProf } = await adminSupabase.from('profiles').select('positive_feedback, negative_feedback, feedback_score').eq('id', SELLER_ID).single();
+    if (!updatedSellerProf) {
+      throw new Error('Seller profile missing after positive feedback submission.');
+    }
     const posDeltaSeller = updatedSellerProf.positive_feedback - initialSellerProf.positive_feedback;
     
     console.log('  ✓ Database Verification: Seller profile counters updated.');
@@ -430,6 +441,9 @@ async function runPart10NTest() {
 
     // Verify Buyer profile reputation update
     const { data: updatedBuyerProf } = await adminSupabase.from('profiles').select('positive_feedback, negative_feedback, feedback_score').eq('id', BUYER_ID).single();
+    if (!updatedBuyerProf) {
+      throw new Error('Buyer profile missing after negative feedback submission.');
+    }
     const negDeltaBuyer = updatedBuyerProf.negative_feedback - initialBuyerProf.negative_feedback;
 
     console.log('  ✓ Database Verification: Buyer profile counters updated.');

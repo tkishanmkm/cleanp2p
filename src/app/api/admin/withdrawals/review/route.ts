@@ -10,13 +10,29 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return auth.response!;
     }
+    if (auth.supportAdmin === true) {
+      return NextResponse.json(
+        { success: false, error: 'Support administrators cannot review or refund withdrawals.' },
+        { status: 403 }
+      );
+    }
 
     const adminId = auth.adminId || auth.user.id;
     const supabaseAdmin = getSupabaseAdminClient();
 
-    const { withdrawalId, action, rejectionReason } = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
 
-    if (!withdrawalId || !['APPROVE', 'REJECT'].includes(action)) {
+    const withdrawalId = typeof body.withdrawalId === 'string' ? body.withdrawalId.trim() : '';
+    const action = body.action;
+    const rejectionReason = typeof body.rejectionReason === 'string'
+      ? body.rejectionReason.trim().slice(0, 1000)
+      : 'Rejected by administrator during security review.';
+    const isWithdrawalIdValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId);
+
+    if (!isWithdrawalIdValid || (action !== 'APPROVE' && action !== 'REJECT')) {
       return NextResponse.json({ error: 'Invalid payload parameters' }, { status: 400 });
     }
 
@@ -28,7 +44,13 @@ export async function POST(req: NextRequest) {
       });
 
       if (rpcError) {
-        return NextResponse.json({ error: rpcError.message || 'Failed to approve withdrawal' }, { status: 400 });
+        console.error('[Admin Withdrawal Review] Approval RPC failed:', rpcError.message);
+        return NextResponse.json({ error: 'Withdrawal approval failed; review the withdrawal status before retrying' }, { status: 500 });
+      }
+
+      if (!rpcData || rpcData.success !== true) {
+        console.error('[Admin Withdrawal Review] Approval RPC returned an unsuccessful result');
+        return NextResponse.json({ error: 'Withdrawal approval was not confirmed' }, { status: 409 });
       }
 
       return NextResponse.json({
@@ -38,26 +60,22 @@ export async function POST(req: NextRequest) {
       });
     } else {
       // Call authoritative refund procedure to safely return liability to available balance
-      const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+      // Refund and audit are performed in one database transaction. If audit insertion fails,
+      // the refund transaction rolls back instead of leaving an unaudited financial change.
+      const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('reject_withdrawal_pending_approval', {
         p_withdrawal_id: withdrawalId,
-        p_error_reason: rejectionReason || 'Rejected by administrator during security review.',
+        p_admin_id: adminId,
+        p_reason: rejectionReason,
       });
 
       if (rpcError) {
-        return NextResponse.json({ error: rpcError.message || 'Failed to reject withdrawal' }, { status: 400 });
+        console.error('[Admin Withdrawal Review] Rejection/refund RPC failed:', rpcError.message);
+        return NextResponse.json({ error: 'Withdrawal rejection failed; reconciliation may be required' }, { status: 500 });
       }
 
-      // Record Admin Rejection in Audit Log
-      await supabaseAdmin.from('admin_audit_logs').insert({
-        admin_id: adminId,
-        admin_email: auth.adminEmail || 'admin@paxones.com',
-        action: 'ADMIN_REJECTED_WITHDRAWAL',
-        details: {
-          withdrawal_id: withdrawalId,
-          rejection_reason: rejectionReason || 'Rejected by administrator during security review.',
-        },
-        created_at: new Date().toISOString(),
-      }).catch(() => null);
+      if (!refundData || refundData.success !== true) {
+        return NextResponse.json({ error: 'Refund was not confirmed by the settlement procedure' }, { status: 500 });
+      }
 
       return NextResponse.json({
         success: true,
@@ -65,8 +83,9 @@ export async function POST(req: NextRequest) {
         message: 'Withdrawal rejected and funds safely returned to user wallet.',
       });
     }
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err) {
+    console.error('[Admin Withdrawal Review] Unexpected request failure:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

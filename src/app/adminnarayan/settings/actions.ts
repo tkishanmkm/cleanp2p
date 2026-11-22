@@ -4,7 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/audit";
-import { setPlatformSettingKey } from "@/lib/platform-settings";
+
+function readFormNumber(formData: FormData, key: string): number {
+  const raw = formData.get(key);
+  if (typeof raw !== "string" || raw.trim() === "") return Number.NaN;
+  return Number(raw);
+}
 
 export async function updateAppSettingsAction(formData: FormData) {
   const auth = await verifyServerAdmin();
@@ -12,46 +17,50 @@ export async function updateAppSettingsAction(formData: FormData) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
 
-  const adminId = auth.adminId;
-  const adminEmail = auth.adminEmail || "admin@paxones.com";
+  const platformFeePercentage = readFormNumber(formData, "platform_fee_percent");
+  const escrowFeePercentage = readFormNumber(formData, "escrow_fee_percent");
+  const minTradeAmount = readFormNumber(formData, "min_trade_amount");
+
+  if (!Number.isFinite(platformFeePercentage) || platformFeePercentage < 0 || platformFeePercentage > 10) {
+    return { success: false, error: "Internal transfer fee must be between 0% and 10%." };
+  }
+  if (!Number.isFinite(escrowFeePercentage) || escrowFeePercentage < 0 || escrowFeePercentage > 10) {
+    return { success: false, error: "Escrow fee must be between 0% and 10%." };
+  }
+  if (!Number.isFinite(minTradeAmount) || minTradeAmount <= 0 || minTradeAmount > 1000000) {
+    return { success: false, error: "Minimum trade amount must be greater than zero and no more than 1,000,000." };
+  }
+
   const adminSupabase = createAdminClient();
-
-  const platformFeePercentage =
-    parseFloat(
-      (formData.get("platform_fee_percentage") ||
-        formData.get("platform_fee_percent")) as string
-    ) || 1.5;
-  const minTradeAmount =
-    parseFloat(formData.get("min_trade_amount") as string) || 10.0;
-
-  // Update fee and transaction threshold controls in app_settings
-  const updatedFields = {
-    platform_fee_percent: platformFeePercentage,
-    min_trade_amount: minTradeAmount,
-    updated_at: new Date().toISOString(),
-  };
+  const updatedAt = new Date().toISOString();
+  const rows = [
+    { key: "platform_fee_percent", value: String(platformFeePercentage), updated_at: updatedAt },
+    { key: "escrow_fee_percent", value: String(escrowFeePercentage), updated_at: updatedAt },
+    { key: "min_trade_amount", value: String(minTradeAmount), updated_at: updatedAt },
+  ];
 
   const { error } = await adminSupabase
     .from("app_settings")
-    .upsert({
-      id: 1,
-      ...updatedFields,
-    });
+    .upsert(rows, { onConflict: "key" });
 
-  if (error) return { success: false, error: error.message };
+  if (error) {
+    return { success: false, error: "Unable to save marketplace fee settings: " + error.message };
+  }
 
-  // Record Audit Event
   await logAdminAction({
-    adminId,
+    adminId: auth.adminId,
     action: "UPDATE_APP_SETTINGS",
-    targetId: "app_settings_1",
+    targetId: "app_settings",
     details: {
-      platform_fee_percentage: platformFeePercentage,
+      platform_fee_percent: platformFeePercentage,
+      escrow_fee_percent: escrowFeePercentage,
       min_trade_amount: minTradeAmount,
     },
   });
 
   revalidatePath("/adminnarayan/settings");
+  revalidatePath("/buy");
+  revalidatePath("/sell");
   return { success: true };
 }
 
@@ -61,66 +70,64 @@ export async function updateWithdrawalGovernanceAction(formData: FormData) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
 
-  const adminId = auth.adminId;
-  const adminEmail = auth.adminEmail || "admin@paxones.com";
-  const adminSupabase = createAdminClient();
+  const maxSingleUsd = readFormNumber(formData, "max_single_withdrawal_usd");
+  const approvalThresholdUsd = readFormNumber(formData, "withdrawal_approval_threshold_usd");
+  const dailyLimitUsd = readFormNumber(formData, "daily_withdrawal_limit_usd");
+  const passwordHoldHours = readFormNumber(formData, "password_change_withdrawal_hold_hours");
+  const withdrawalFeeMultiplier = readFormNumber(formData, "withdrawal_fee_multiplier");
 
-  const maxSingleUsd = parseFloat(formData.get("max_single_withdrawal_usd") as string);
-  const approvalThresholdUsd = parseFloat(formData.get("withdrawal_approval_threshold_usd") as string);
-  const dailyLimitUsd = parseFloat(formData.get("daily_withdrawal_limit_usd") as string);
-  const passwordHoldHours = parseFloat(formData.get("password_change_withdrawal_hold_hours") as string);
-
-  if (isNaN(maxSingleUsd) || maxSingleUsd <= 0) {
+  if (!Number.isFinite(maxSingleUsd) || maxSingleUsd <= 0) {
     return { success: false, error: "Maximum single withdrawal must be a positive number." };
   }
-  if (isNaN(approvalThresholdUsd) || approvalThresholdUsd <= 0) {
+  if (!Number.isFinite(approvalThresholdUsd) || approvalThresholdUsd <= 0) {
     return { success: false, error: "Approval threshold must be a positive number." };
   }
-  if (isNaN(dailyLimitUsd) || dailyLimitUsd <= 0) {
+  if (!Number.isFinite(dailyLimitUsd) || dailyLimitUsd <= 0) {
     return { success: false, error: "Daily withdrawal limit must be a positive number." };
   }
-  if (isNaN(passwordHoldHours) || passwordHoldHours < 0) {
-    return { success: false, error: "Password change hold duration cannot be negative." };
+  if (!Number.isFinite(passwordHoldHours) || passwordHoldHours < 0 || passwordHoldHours > 168) {
+    return { success: false, error: "Password change hold must be between 0 and 168 hours." };
+  }
+  if (!Number.isFinite(withdrawalFeeMultiplier) || withdrawalFeeMultiplier < 1 || withdrawalFeeMultiplier > 10) {
+    return { success: false, error: "Withdrawal gas fee multiplier must be between 1x and 10x." };
   }
 
-  // Prevent nonsensical combinations
   if (approvalThresholdUsd > maxSingleUsd) {
-    return { success: false, error: "Approval threshold ($" + approvalThresholdUsd + ") cannot exceed maximum single withdrawal ($" + maxSingleUsd + ")." };
+    return {
+      success: false,
+      error: "Approval threshold ($" + approvalThresholdUsd + ") cannot exceed maximum single withdrawal ($" + maxSingleUsd + ").",
+    };
   }
   if (dailyLimitUsd < maxSingleUsd) {
-    return { success: false, error: "Daily withdrawal limit ($" + dailyLimitUsd + ") cannot be less than maximum single withdrawal ($" + maxSingleUsd + ")." };
+    return {
+      success: false,
+      error: "Daily withdrawal limit ($" + dailyLimitUsd + ") cannot be less than maximum single withdrawal ($" + maxSingleUsd + ").",
+    };
   }
 
+  const adminSupabase = createAdminClient();
   const updatedFields = {
     max_single_withdrawal_usd: maxSingleUsd,
     withdrawal_approval_threshold_usd: approvalThresholdUsd,
     daily_withdrawal_limit_usd: dailyLimitUsd,
     password_change_withdrawal_hold_hours: passwordHoldHours,
+    withdrawal_fee_multiplier: withdrawalFeeMultiplier,
     updated_at: new Date().toISOString(),
   };
 
   const { error } = await adminSupabase
     .from("platform_settings")
-    .upsert({
-      id: 1,
-      ...updatedFields,
-    });
+    .upsert({ id: 1, ...updatedFields }, { onConflict: "id" });
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: "Unable to save withdrawal governance settings: " + error.message };
   }
 
-  // Record Audit Event
   await logAdminAction({
-    adminId,
+    adminId: auth.adminId,
     action: "UPDATE_WITHDRAWAL_GOVERNANCE",
     targetId: "platform_settings_1",
-    details: {
-      max_single_withdrawal_usd: maxSingleUsd,
-      withdrawal_approval_threshold_usd: approvalThresholdUsd,
-      daily_withdrawal_limit_usd: dailyLimitUsd,
-      password_change_withdrawal_hold_hours: passwordHoldHours,
-    },
+    details: updatedFields,
   });
 
   revalidatePath("/adminnarayan/settings");

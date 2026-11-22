@@ -2,10 +2,13 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { getPlatformFeeSettings } from '@/lib/platform-fees';
 import { generateTradeId } from '@/lib/id-generator';
 import { findAdById } from '@/lib/ad-lookup';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { checkAdOwnerAvailability } from '@/lib/ad-owner-availability';
 import { isTier2User } from '@/lib/kyc';
 
 export interface ActionResponse<T> {
@@ -30,154 +33,17 @@ function isValidUUID(str: any): boolean {
  * 3. user_wallets table/view
  * 4. profiles table (btc_balance, eth_balance, ltc_balance, usdt_balance, wallets JSON)
  */
-async function fetchUserCryptoBalance(userId: string, assetSymbol: string) {
-  const adminClient = getSupabaseAdminClient();
-  const normalizedSym = (assetSymbol || 'BTC').toUpperCase();
-  let available = 0;
-  let lockedEscrow = 0;
-  let walletId: string | null = null;
-  let matchedAssetRow: any = null;
-
-  if (!userId) {
-    return { available: 0, lockedEscrow: 0, walletId: null, matchedAssetRow: null, normalizedSym };
-  }
-
-  // 1. Check wallets -> wallet_assets relation
-  try {
-    const { data: wallet } = await adminClient
-      .from('wallets')
-      .select('id, user_id')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (wallet?.id) {
-      walletId = wallet.id;
-      const { data: assets } = await adminClient
-        .from('wallet_assets')
-        .select('*')
-        .eq('wallet_id', wallet.id);
-
-      if (assets && assets.length > 0) {
-        const match = assets.find((a: any) => {
-          const sym = String(a.asset_code || a.asset_symbol || a.symbol || a.crypto || '').toUpperCase();
-          return sym === normalizedSym;
-        });
-        if (match) {
-          matchedAssetRow = match;
-          const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-          const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-          if (!isNaN(avail) && avail > available) available = avail;
-          if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] wallets query error:', err);
-  }
-
-  // 2. Check wallet_assets directly by user_id
-  try {
-    const { data: directAssets } = await adminClient
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (directAssets && directAssets.length > 0) {
-      const match = directAssets.find((a: any) => {
-        const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        if (!matchedAssetRow) matchedAssetRow = match;
-        const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-        const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] direct wallet_assets query error:', err);
-  }
-
-  // 3. Check user_wallets table / view
-  try {
-    const { data: userWallets } = await adminClient
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (userWallets && userWallets.length > 0) {
-      const match = userWallets.find((w: any) => {
-        const sym = String(w.asset_symbol || w.asset_code || w.symbol || w.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        const avail = Number(match.available_balance ?? match.available ?? match.balance ?? 0);
-        const locked = Number(match.locked_balance ?? match.locked ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] user_wallets query error:', err);
-  }
-
-  // 4. Check profiles table columns
-  try {
-    const { data: profile } = await adminClient
-      .from('profiles')
-      .select('*')
-      .or(`id.eq.${userId},user_id.eq.${userId}`)
-      .maybeSingle();
-
-    if (profile) {
-      let profBalance = 0;
-      if (normalizedSym === 'BTC') {
-        profBalance = Number(profile.btc_balance ?? profile.btcBalance ?? profile.wallets?.BTC?.balance ?? 0);
-      } else if (normalizedSym === 'ETH') {
-        profBalance = Number(profile.eth_balance ?? profile.ethBalance ?? profile.wallets?.ETH?.balance ?? 0);
-      } else if (normalizedSym === 'LTC') {
-        profBalance = Number(profile.ltc_balance ?? profile.ltcBalance ?? profile.wallets?.LTC?.balance ?? 0);
-      } else if (normalizedSym === 'USDT') {
-        profBalance = Number(profile.usdt_balance ?? profile.usdtBalance ?? profile.wallets?.USDT?.balance ?? 0);
-      }
-
-      if (!isNaN(profBalance) && profBalance > available) {
-        available = profBalance;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] profiles balance query error:', err);
-  }
-
-  return {
-    available,
-    lockedEscrow,
-    walletId,
-    matchedAssetRow,
-    normalizedSym,
-  };
-}
 
 export async function getMarketplaceAds(tradeType: 'BUY' | 'SELL' | 'buy' | 'sell'): Promise<ActionResponse<any[]>> {
   try {
     const supabase = await createClient();
     const queryTradeType = tradeType.toUpperCase();
 
-    // Query linking ads.user_id -> profiles.id
+    // Public seller details come from the narrow public_profiles projection,
+    // not a relationship join to the private profiles table.
     const { data: ads, error } = await supabase
       .from('ads')
-      .select(`
-        *,
-        profiles!user_id (
-          id,
-          username,
-          avatar_url,
-          is_online,
-          last_seen,
-          created_at
-        )
-      `)
+      .select('*')
       .or(`trade_type.eq.${queryTradeType},type.eq.${queryTradeType.toLowerCase()}`)
       .order('created_at', { ascending: false });
 
@@ -194,12 +60,34 @@ export async function getMarketplaceAds(tradeType: 'BUY' | 'SELL' | 'buy' | 'sel
       };
     }
 
-    const formattedAds = (ads || []).map((ad) => {
-      const profileRecord = Array.isArray(ad.profiles) ? ad.profiles[0] : ad.profiles || ad.user;
+    const sellerIds = Array.from(new Set(
+      (ads || []).map((ad: any) => ad.user_id).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    ));
+    const { data: publicProfiles, error: publicProfilesError } = sellerIds.length > 0
+      ? await supabase
+          .from('public_profiles')
+          .select('id, username, avatar_url, photo_url, is_online, created_at, merchant_tier, completed_trades, positive_feedback, negative_feedback')
+          .in('id', sellerIds)
+      : { data: [], error: null };
+
+    if (publicProfilesError) {
+      console.error('[Marketplace Public Profile Query Error]:', publicProfilesError);
+      return {
+        data: null,
+        error: {
+          message: 'Trader profile information is temporarily unavailable.',
+          code: publicProfilesError.code,
+        },
+      };
+    }
+
+    const profileMap = new Map((publicProfiles || []).map((profile: any) => [profile.id, profile]));
+    const formattedAds = (ads || []).map((ad: any) => {
+      const profileRecord = profileMap.get(ad.user_id) || null;
       return {
         ...ad,
-        profiles: profileRecord || null,
-        user: profileRecord || null,
+        profiles: profileRecord,
+        user: profileRecord,
       };
     });
 
@@ -279,8 +167,8 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
     if (ad && ad.user_id) {
       try {
         const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
+          .from('public_profiles')
+          .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
           .eq('id', ad.user_id)
           .maybeSingle();
         if (prof) {
@@ -292,80 +180,68 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
       }
     }
 
-    // 5. If still not in database, provide a fully-functional fallback advertisement object
+    // Never synthesize a marketplace offer when the persisted ad cannot be found.
+    // Fake seller identities/prices can send buyers into a trade that cannot be escrowed.
     if (!ad) {
-      ad = {
-        id: adId,
-        public_id: adId,
-        public_ad_id: adId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        rate_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        min_limit: 10,
-        max_limit: 5000,
-        min_amount: 10,
-        max_amount: 5000,
-        total_amount: 0.5,
-        available_amount: 0.5,
-        payment_methods: ['Bank Transfer', 'Wise', 'PayPal', 'Revolut'],
-        offer_tags: ['Fast release', 'Verified trader', 'Instant escrow'],
-        terms_conditions: 'Trade securely with escrow protection. Please complete payment using your verified payment method. Coins are released immediately upon payment confirmation.',
-        trader_presence: 'Online',
-        profiles: {
-          id: 'trader_verified_1',
-          username: 'VerifiedTrader',
-          full_name: 'Verified Trader',
-          avatar_url: null,
-          is_online: true,
-          is_verified: true,
-          kyc_status: 'approved',
-          feedback_score: 99.4,
-          positive_feedback: 412,
-          negative_feedback: 2,
-          completed_trades: 410,
-          avg_release_minutes: 3.5,
-          avg_payment_minutes: 4.2,
-          created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180).toISOString(),
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
         },
       };
-      profileData = ad.profiles;
     }
 
-    const sellerId = ad.user_id;
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset || 'BTC').toUpperCase();
-
-    // 6. Fetch trader's current wallet balance for the ad asset
-    let creatorCryptoBalance = Number(ad.total_amount ?? ad.available_amount ?? 0.5);
-    if (sellerId && sellerId !== 'trader_verified_1') {
-      try {
-        const balanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-        if (balanceInfo.available > 0) {
-          creatorCryptoBalance = balanceInfo.available;
-        }
-      } catch (err) {
-        console.warn('Failed to fetch creator wallet balance:', err);
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    const isPubliclyActive =
+      ad.active === true &&
+      ad.is_active === true &&
+      ad.is_deleted !== true &&
+      adStatus === 'ACTIVE';
+    if (!isPubliclyActive) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const isOwner = Boolean(user?.id && user.id === ad.user_id);
+      const adminAuth = await verifyServerAdmin();
+      if (!isOwner && !adminAuth.authorized) {
+        return {
+          data: null,
+          error: {
+            message: 'Advertisement not found or no longer available.',
+            code: 'AD_NOT_FOUND',
+          },
+        };
       }
     }
 
+    if (!ad.user_id || typeof ad.user_id !== 'string') {
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement owner could not be verified.',
+          code: 'AD_OWNER_UNAVAILABLE',
+        },
+      };
+    }
+
+    const sellerId = ad.user_id;
+    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset || '').toUpperCase();
+    if (!assetSymbol) {
+      return {
+        data: null,
+        error: { message: 'Advertisement asset is missing.', code: 'AD_ASSET_INVALID' },
+      };
+    }
+
+    // The wallet_assets escrow RPC is the authoritative concurrent balance check.
+    // Do not expose a balance from a legacy table as a trade availability guarantee.
+    const creatorCryptoBalance = Number(ad.total_amount ?? ad.available_amount ?? 0);
+
     // 7. Fetch trade statistics for the ad creator
-    let totalTrades = Number(profileData?.completed_trades || 120);
-    let completedTrades = Number(profileData?.completed_trades || 118);
+    let totalTrades = Math.max(0, Number(profileData?.total_trades ?? profileData?.completed_trades ?? 0) || 0);
+    let completedTrades = Math.max(0, Number(profileData?.completed_trades ?? 0) || 0);
     let totalReleaseMinutes = 0;
 
-    if (sellerId && sellerId !== 'trader_verified_1') {
+    if (sellerId) {
       try {
         const { data: trades, error: tradesError } = await adminClient
           .from('trades')
@@ -396,10 +272,10 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 
     const avgReleaseTime = completedTrades > 0 && totalReleaseMinutes > 0
       ? totalReleaseMinutes / completedTrades
-      : Number(profileData?.avg_release_minutes || 3.5);
+      : Number(profileData?.avg_release_minutes ?? 0);
     const completionRate = totalTrades > 0
       ? (completedTrades / totalTrades) * 100
-      : Number(profileData?.feedback_score || 99);
+      : 0;
 
     // 8. Return normalized, type-safe payload
     const normalizedProfile = Array.isArray(ad.profiles) ? ad.profiles[0] : ad.profiles || ad.user || profileData;
@@ -411,10 +287,10 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
         profiles: normalizedProfile || null,
         user: normalizedProfile || null,
         sellerStats: {
-          totalTrades: totalTrades || 10,
-          completedTrades: completedTrades || 10,
-          completionRate: Number(completionRate) || 100,
-          avgReleaseTime: Number(avgReleaseTime) || 3.5,
+          totalTrades,
+          completedTrades,
+          completionRate: Number(completionRate),
+          avgReleaseTime: Number(avgReleaseTime),
         },
       },
       error: null,
@@ -433,6 +309,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -462,58 +339,37 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
     }
 
     const adTypeResolved = String(formData.type || formData.adType || 'SELL').toUpperCase();
-    if (adTypeResolved === 'SELL') {
-      const { data: creatorProfile } = await adminClient
-        .from('profiles')
-        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
-        .eq('id', userId)
-        .maybeSingle();
-
-      const isTier2 = isTier2User(creatorProfile);
-
-      if (!isTier2) {
-        return {
-          data: null,
-          error: {
-            message: 'KYC verification is required to sell.',
-            code: 'KYC_REQUIRED',
-          },
-        };
-      }
+    if (adTypeResolved !== 'BUY' && adTypeResolved !== 'SELL') {
+      return {
+        data: null,
+        error: { message: 'Advertisement direction must be BUY or SELL.', code: 'INVALID_AD_DIRECTION' },
+      };
     }
 
-    const { data, error } = await supabase
-      .from('ads')
-      .insert({
-        user_id: userId,
-        type: adTypeResolved,
-        asset_symbol: formData.crypto || formData.asset_symbol || 'USDT',
-        fiat_symbol: formData.fiat || formData.fiat_symbol || 'USD',
-        price: formData.price ? Number(formData.price) : 0,
-        total_amount: formData.totalAmount || formData.total_amount ? Number(formData.totalAmount || formData.total_amount) : 0,
-        min_limit: formData.minLimit || formData.min_limit ? Number(formData.minLimit || formData.min_limit) : 0,
-        max_limit: formData.maxLimit || formData.max_limit ? Number(formData.maxLimit || formData.max_limit) : 0,
-        payment_methods: formData.paymentMethods || formData.payment_methods || [],
-        ad_tags: formData.tags || formData.ad_tags || [],
-        terms: formData.terms || formData.instructions || '',
-        is_active: true,
-      })
-      .select()
-      .single();
-
-    if (error) {
+    // Every other ad-creation entry point rejects SELL until wallet inventory is
+    // reserved atomically with ad creation and consumed by the escrow RPC. Keep
+    // this server action on the same fail-closed contract; KYC alone is not a
+    // substitute for reserving the advertised crypto balance.
+    if (adTypeResolved === 'SELL') {
       return {
         data: null,
         error: {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
+          message: 'SELL advertisements are temporarily unavailable until atomic wallet inventory reservation is enabled.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
         },
       };
     }
 
-    return { data, error: null };
+    // This legacy server action used to INSERT directly into public.ads. That
+    // path bypassed the canonical pricing, FX, account and dual-table checks.
+    // All supported callers must use the validated /api/p2p/ads endpoint.
+    return {
+      data: null,
+      error: {
+        message: 'This legacy ad-creation action is retired. Use the canonical marketplace ad-creation flow.',
+        code: 'LEGACY_AD_CREATE_ACTION_RETIRED',
+      },
+    };
   } catch (err: any) {
     return {
       data: null,
@@ -574,40 +430,23 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
+    // Fail closed: never synthesize an advertisement when the requested ad does not exist.
+    // Creating escrow against fabricated ad data could lock funds without a valid offer.
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
-    // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    const resolvedPublicId = String(ad.public_ad_id || ad.public_id || ad.id || cleanAdId);
+
+
+    // Trade initiation is always restricted to a different advertisement owner.
+    if (String(ad.user_id || '') === user.id) {
       return {
         data: null,
         error: {
@@ -627,28 +466,54 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 3. Get Dynamic Escrow Fee from settings (Fallback to 1.5%)
-    let escrowFeePercent = 1.5;
+    // Fees and minimums come from the single canonical app_settings contract.
+    // Never silently substitute a default when a financial control is unavailable.
+    let minTradeAmount: number;
     try {
-      const { data: feeSetting } = await adminClient
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'escrow_fee_percent')
-        .maybeSingle();
-
-      if (feeSetting?.value) {
-        escrowFeePercent = Number(feeSetting.value) || 1.5;
-      }
-    } catch {
-      escrowFeePercent = 1.5;
+      const feeSettings = await getPlatformFeeSettings();
+      minTradeAmount = feeSettings.minTradeAmount;
+    } catch (feeError) {
+      console.error('[createTradeOrderWithEscrow] Unable to verify platform fee settings:', feeError);
+      return {
+        data: null,
+        error: {
+          message: 'Trade fee settings are temporarily unavailable. Please retry.',
+          code: 'TRADE_FEE_CONFIG_UNAVAILABLE',
+        },
+      };
     }
 
-    // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    // Use only the persisted ad price/limits. Never synthesize a price or amount range.
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return {
+        data: null,
+        error: { message: 'Advertisement has an invalid price.', code: 'AD_PRICE_INVALID' },
+      };
+    }
+    if (!Number.isFinite(minLimit) || minLimit <= 0 || !Number.isFinite(maxLimit) || maxLimit < minLimit) {
+      return {
+        data: null,
+        error: { message: 'Advertisement order limits are missing or invalid.', code: 'AD_LIMITS_INVALID' },
+      };
+    }
+    if (!Number.isFinite(fiatAmount) || fiatAmount <= 0) {
+      return {
+        data: null,
+        error: { message: 'Trade amount must be a positive number.', code: 'TRADE_AMOUNT_INVALID' },
+      };
+    }
+    if (String(ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase() === 'USD' && fiatAmount < minTradeAmount) {
+      return {
+        data: null,
+        error: { message: `Minimum trade amount is ${minTradeAmount} USD.`, code: 'MIN_TRADE_AMOUNT_NOT_MET' },
+      };
+    }
+    const assetSymbol = (ad.asset_symbol || ad.crypto_currency || ad.coin || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
     const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
 
     // 5. Determine who is providing crypto for escrow:
@@ -662,23 +527,40 @@ export async function createTradeOrderWithEscrow(input: {
 
     const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
     const isInitiatorSelling = isBuyAd;
-    const isAdSell = !isBuyAd;
 
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
+
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim()) {
+      return {
+        data: null,
+        error: { message: 'Advertisement owner could not be verified.', code: 'AD_OWNER_UNAVAILABLE' },
+      };
+    }
     const sellerId = isInitiatorSelling ? user.id : adOwnerId;
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
+    const resolvedSellerId = sellerId;
+    const resolvedBuyerId = buyerId;
 
-    // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
-    // Seller MUST be Tier 2
-    const { data: sellerProf } = await adminClient
+    // The canonical escrow RPC performs authoritative, transaction-safe KYC tier
+    // and cumulative BUY-volume checks. Avoid a second, stale profile/trade read here.
+
+    // SELLER Tier 2 is a prerequisite before recording an offline-open attempt.
+    // Use only the deployed kyc_status field; the escrow RPC rechecks Tier 2 itself.
+    const { data: sellerProfile, error: sellerProfileError } = await adminClient
       .from('profiles')
-      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
-      .eq('id', sellerId)
+      .select('kyc_status')
+      .eq('id', resolvedSellerId)
       .maybeSingle();
-
-    const isSellerTier2 = isTier2User(sellerProf);
-
-    if (!isSellerTier2) {
+    if (sellerProfileError || !sellerProfile) {
+      return {
+        data: null,
+        error: {
+          message: 'Seller verification status could not be confirmed. Please retry.',
+          code: 'SELLER_KYC_STATUS_UNAVAILABLE',
+        },
+      };
+    }
+    if (!isTier2User(sellerProfile)) {
       return {
         data: null,
         error: {
@@ -688,78 +570,26 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // Buyer: If Tier 1, cumulative BUY volume capped at $1,000.00
-    const { data: buyerProf } = await adminClient
-      .from('profiles')
-      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
-      .eq('id', buyerId)
-      .maybeSingle();
-
-    const isBuyerTier2 = isTier2User(buyerProf);
-
-    if (!isBuyerTier2) {
-      const { data: existingBuyerTrades } = await adminClient
-        .from('trades')
-        .select('fiat_amount, crypto_amount, price, unit_price, status')
-        .eq('buyer_id', buyerId);
-
-      const NON_QUALIFYING = new Set(['cancelled', 'canceled', 'expired', 'failed', 'rejected']);
-      let cumBuys = 0;
-      for (const t of existingBuyerTrades || []) {
-        if (!NON_QUALIFYING.has(String(t.status || '').toLowerCase().trim())) {
-          cumBuys += Number(t.fiat_amount) || (Number(t.crypto_amount || 0) * Number(t.price ?? t.unit_price ?? 1.0));
-        }
-      }
-
-      if ((cumBuys + fiatAmount) > 1000.00) {
-        return {
-          data: null,
-          error: {
-            message: 'Tier 1 accounts can buy up to $1,000 cumulatively. Complete KYC to increase your buy limit.',
-            code: 'KYC_TIER1_BUY_LIMIT_EXCEEDED',
-          },
-        };
-      }
-    }
-
-    // Check Seller available balance comprehensively
-    const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-    let currentSellerAvail = sellerBalanceInfo.available;
-
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
-    }
-
-    // Effective max limit check
-    let effectiveMaxLimit = maxLimit;
-    if (isAdSell && currentSellerAvail > 0 && price > 0) {
-      const advertiserMaxFiat = currentSellerAvail * price;
-      effectiveMaxLimit = Math.min(maxLimit, advertiserMaxFiat > 0 ? advertiserMaxFiat : maxLimit);
-    }
-
-    // Validate trade limits
-    if (fiatAmount < minLimit || fiatAmount > effectiveMaxLimit) {
+    // Buyer cumulative KYC limits are enforced only by the escrow RPC, which
+    // computes its authoritative USD snapshot within the trade transaction.
+    // Validate the advertisement's published order limits. The canonical database
+    // RPC performs the authoritative concurrent wallet_assets lock and escrow check;
+    // do not use a max-of-legacy-wallet-tables preflight as a substitute for that lock.
+    if (fiatAmount < minLimit || fiatAmount > maxLimit) {
       return {
         data: null,
         error: {
-          message: `Trade amount must be between ${minLimit.toLocaleString()} and ${effectiveMaxLimit.toLocaleString()} ${fiatSymbol}.`,
-          code: '400',
+          message: `Trade amount must be between ${minLimit.toLocaleString()} and ${maxLimit.toLocaleString()} ${fiatSymbol}.`,
+          code: 'TRADE_LIMIT_EXCEEDED',
         },
       };
     }
 
-    const baseCryptoAmount = price > 0 ? Number((fiatAmount / price).toFixed(6)) : 0;
-    const escrowFeeCrypto = Number(((baseCryptoAmount * escrowFeePercent) / 100).toFixed(6));
-    const totalCryptoRequiredForSeller = Number((baseCryptoAmount + escrowFeeCrypto).toFixed(6));
-
-    // 6. REAL-TIME FUNDING & BALANCE VERIFICATION
-    if (currentSellerAvail < totalCryptoRequiredForSeller) {
-      const msg = isInitiatorSelling
-        ? `Insufficient wallet balance. You need ${totalCryptoRequiredForSeller.toFixed(6)} ${assetSymbol} (including ${escrowFeePercent}% escrow fee) to initiate this trade.`
-        : `The advertiser does not have enough available balance to fund this trade right now.`;
+    const baseCryptoAmount = Number((fiatAmount / price).toFixed(8));
+    if (!Number.isFinite(baseCryptoAmount) || baseCryptoAmount <= 0) {
       return {
         data: null,
-        error: { message: msg, code: 'INSUFFICIENT_FUNDS' },
+        error: { message: 'Trade amount is below the supported precision.', code: 'TRADE_AMOUNT_PRECISION' },
       };
     }
 
@@ -776,11 +606,15 @@ export async function createTradeOrderWithEscrow(input: {
       }
     } else if (ad.payment_method) {
       rawPaymentMethods = [ad.payment_method];
-    } else {
-      rawPaymentMethods = ['Bank Transfer'];
     }
 
     const paymentMethods: string[] = rawPaymentMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+    if (paymentMethods.length === 0) {
+      return {
+        data: null,
+        error: { message: 'Advertisement has no configured payment methods.', code: 'AD_PAYMENT_METHODS_MISSING' },
+      };
+    }
     let resolvedPaymentMethod = '';
     const trimmedInputMethod = typeof input.paymentMethod === 'string' ? input.paymentMethod.trim() : '';
 
@@ -825,7 +659,25 @@ export async function createTradeOrderWithEscrow(input: {
         error: { message: 'Idempotency key is required to initiate trade order.', code: 'IDEMPOTENCY_KEY_REQUIRED' },
       };
     }
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || cleanAdId);
+    const adIdentifier = resolvedPublicId;
+
+    // Match the API trade path: an authenticated buyer must pass the online
+    // advertiser guard before the escrow RPC can open the trade.
+    const availabilityResponse = await checkAdOwnerAvailability(
+      supabase,
+      resolvedPublicId,
+      resolvedIdempotencyKey
+    );
+    if (availabilityResponse) {
+      const availabilityPayload = await availabilityResponse.json().catch(() => null);
+      return {
+        data: null,
+        error: {
+          message: availabilityPayload?.error || 'Advertiser availability could not be verified. Please retry.',
+          code: availabilityPayload?.code || 'AD_AVAILABILITY_CHECK_FAILED',
+        },
+      };
+    }
 
     const { data: rpcResult, error: rpcError } = await adminClient.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
@@ -869,13 +721,6 @@ export async function createTradeOrderWithEscrow(input: {
           code: '500',
         },
       };
-    }
-
-    if (resolvedPaymentMethod) {
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
     }
 
     // 9. Insert Activity Center In-App Notifications for counterparties

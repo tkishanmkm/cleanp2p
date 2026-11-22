@@ -79,7 +79,7 @@ function User2FAChallengeForm() {
       <Card className="w-full max-w-md bg-white dark:bg-[#0b0e17] border-slate-200 dark:border-[#1e2640] shadow-xl">
         <CardHeader className="space-y-3">
           <div className="flex items-center justify-between">
-            <Link href="/" title="Back to Paxones">
+            <Link href="/" title="Back to Wayones">
               <Logo variant="desktop" priority />
             </Link>
             <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/40 flex items-center justify-center shrink-0">

@@ -1,8 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { NextRequest } from 'next/server';
+import { generateMnemonic } from 'bip39';
 import { deriveAllAddresses } from '../src/lib/hd-derivation-engine';
 import { POST } from '../src/app/api/auth/provision-wallets/route';
+
+// Use a fresh, disposable mnemonic for this unit test; never depend on production wallet secrets.
+process.env.DEPOSIT_HD_MNEMONIC = generateMnemonic();
 
 describe('Wallet Provisioning Security & Logic Unit Tests', () => {
   it('A. Deterministic derivation produces distinct non-zero address sets for different indices', async () => {

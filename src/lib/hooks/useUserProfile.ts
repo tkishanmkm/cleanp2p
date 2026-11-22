@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
 
 export function useUserProfile(userId: string | undefined) {
   const [profile, setProfile] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (!userId) {
+      setProfile(null);
       setLoading(false);
       return;
     }
@@ -16,30 +17,58 @@ export function useUserProfile(userId: string | undefined) {
       setLoading(true);
 
       try {
-        // Fetch Profile Info & Computed Stats in parallel
-        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
-        const [profileRes, statsRes] = await Promise.all([
-          supabase.from("profiles").select(PUBLIC_PROFILE_COLUMNS).eq("id", userId).maybeSingle(),
-          supabase.from("user_account_stats").select("*").eq("user_id", userId).maybeSingle()
-        ]);
+        // Public profile reads must go through the server's explicit column
+        // allowlist; browser roles have no direct SELECT grant on profiles.
+        const response = await fetch(`/api/users/${encodeURIComponent(userId ?? "")}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
 
-        if (profileRes.data) {
-          setProfile(profileRes.data);
+        if (!response.ok) {
+          throw new Error(`Public profile request failed (${response.status})`);
         }
-        if (statsRes.data) {
-          setStats(statsRes.data);
-        }
+
+        const data = await response.json();
+        const stats = data?.stats ?? {};
+        const publicProfile = {
+          id: data.id,
+          username: typeof data.username === "string" ? data.username.replace(/^@/, "") : null,
+          display_name: data.display_name ?? null,
+          avatar_url: data.avatar_url ?? data.photo_url ?? null,
+          photo_url: data.photo_url ?? data.avatar_url ?? null,
+          country: data.country ?? null,
+          is_verified: data.is_id_verified === true,
+          is_online: data.is_online === true,
+          last_seen_at: data.last_seen_at ?? data.last_seen ?? null,
+          created_at: data.joined_at ?? data.created_at ?? null,
+          total_completed_trades: stats.completed_trades ?? 0,
+          completed_trades: stats.completed_trades ?? 0,
+          trade_volume: stats.total_trade_volume ?? 0,
+          total_trade_volume: stats.total_trade_volume ?? 0,
+          positive_feedback: stats.positive_feedback_count ?? 0,
+          negative_feedback: stats.negative_feedback_count ?? 0,
+          feedback_score: stats.positive_feedback_pct ?? "100.0%",
+        };
+
+        if (!cancelled) setProfile(publicProfile);
       } catch (err) {
-        console.error("Error fetching user profile & stats:", err);
+        if (!cancelled) {
+          setProfile(null);
+          console.error("Error fetching public user profile:", err);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadData();
+    void loadData();
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
-  return { profile, stats, loading };
+  return { profile, loading };
 }
 
 export default useUserProfile;

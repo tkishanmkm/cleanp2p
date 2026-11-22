@@ -3,14 +3,23 @@ import { createServerClient } from '@supabase/ssr';
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { tradeId: string } }
+  { params }: { params: Promise<{ tradeId: string }> }
 ) {
   try {
-    const { tradeId } = params;
-    const { reason } = await req.json();
+    const { tradeId } = await params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tradeId)) {
+      return NextResponse.json({ error: 'Invalid trade ID.' }, { status: 400 });
+    }
 
-    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
-      return NextResponse.json({ error: 'Dispute reason is required' }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON.' }, { status: 400 });
+    }
+    const reason = (body as { reason?: unknown } | null)?.reason;
+    if (typeof reason !== 'string' || reason.trim().length === 0 || reason.trim().length > 4000) {
+      return NextResponse.json({ error: 'A dispute reason between 1 and 4000 characters is required.' }, { status: 400 });
     }
 
     const supabase = createServerClient(
@@ -30,18 +39,25 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // The live RPC signature is raise_trade_dispute(p_trade_id, p_user_id, p_reason).
+    // With a cookie-bound client, the RPC must bind this ID to auth.uid().
     const { data, error } = await supabase.rpc('raise_trade_dispute', {
       p_trade_id: tradeId,
-      p_caller_id: user.id,
+      p_user_id: user.id,
       p_reason: reason.trim(),
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      console.error('[P2P dispute] RPC failed:', { code: error.code || 'UNKNOWN' });
+      return NextResponse.json({ error: 'Failed to open trade dispute.' }, { status: 400 });
+    }
+    if (!data || data.success !== true) {
+      return NextResponse.json({ error: data?.message || 'Failed to open trade dispute.' }, { status: 400 });
     }
 
     return NextResponse.json({ success: true, data });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err) {
+    console.error('[P2P dispute] Unexpected route error.');
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

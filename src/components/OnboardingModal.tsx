@@ -165,7 +165,7 @@ export function OnboardingModal() {
                 Age Requirement Notice (18+ Only)
               </DialogTitle>
               <DialogDescription className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
+                Wayones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
               </DialogDescription>
               <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold pt-1">
                 The date of birth you entered indicates you are under 18 years old.

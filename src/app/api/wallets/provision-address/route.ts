@@ -3,179 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
-import { deriveHDAddress, encodeBech32 } from '@/lib/hd-wallet';
-import { ethers } from 'ethers';
-import crypto from 'crypto';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
-
-// Base58 Alphabet
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-/**
- * Base58Check decoder for private keys / WIF
- */
-function decodeBase58Check(str: string): Buffer {
-  let num = 0n;
-  for (let i = 0; i < str.length; i++) {
-    const charIndex = BASE58_ALPHABET.indexOf(str[i]);
-    if (charIndex === -1) {
-      throw new Error(`Invalid Base58 character: ${str[i]}`);
-    }
-    num = num * 58n + BigInt(charIndex);
-  }
-
-  let hex = num.toString(16);
-  if (hex.length % 2 !== 0) {
-    hex = '0' + hex;
-  }
-  let bytes = Buffer.from(hex, 'hex');
-
-  let leadingZeros = 0;
-  for (let i = 0; i < str.length && str[i] === '1'; i++) {
-    leadingZeros++;
-  }
-  if (leadingZeros > 0) {
-    bytes = Buffer.concat([Buffer.alloc(leadingZeros, 0), bytes]);
-  }
-
-  if (bytes.length < 4) {
-    throw new Error('Base58Check string too short');
-  }
-
-  const payload = bytes.subarray(0, bytes.length - 4);
-  const checksum = bytes.subarray(bytes.length - 4);
-  const hash1 = crypto.createHash('sha256').update(payload).digest();
-  const hash2 = crypto.createHash('sha256').update(hash1).digest();
-  const expectedChecksum = hash2.subarray(0, 4);
-
-  if (!checksum.equals(expectedChecksum)) {
-    throw new Error('Invalid Base58Check checksum');
-  }
-
-  return payload;
-}
-
-/**
- * Derives a Tron Base58Check address (T...) from a raw private key hex or WIF string
- */
-function getTronAddressFromPrivateKey(privKey: string): string {
-  try {
-    let cleanHex = privKey.trim();
-    if (cleanHex.startsWith('0x') || cleanHex.startsWith('0X')) {
-      cleanHex = cleanHex.slice(2);
-    }
-
-    if (cleanHex.length !== 64 && (cleanHex.startsWith('5') || cleanHex.startsWith('K') || cleanHex.startsWith('L'))) {
-      const decoded = decodeBase58Check(cleanHex);
-      const rawKeyBytes = decoded.subarray(1, 33);
-      cleanHex = rawKeyBytes.toString('hex');
-    }
-
-    const signingKey = new ethers.SigningKey('0x' + cleanHex);
-    const uncompressedPubKey = signingKey.publicKey;
-    const pubKeyBytes = Buffer.from(uncompressedPubKey.slice(4), 'hex');
-
-    const keccakHash = ethers.keccak256(pubKeyBytes);
-    const last20Bytes = Buffer.from(keccakHash.slice(2 + 24), 'hex');
-
-    const tronPayload = Buffer.concat([Buffer.from([0x41]), last20Bytes]);
-    const hash1 = crypto.createHash('sha256').update(tronPayload).digest();
-    const hash2 = crypto.createHash('sha256').update(hash1).digest();
-    const checksum = hash2.subarray(0, 4);
-    const fullData = Buffer.concat([tronPayload, checksum]);
-
-    let num = BigInt('0x' + fullData.toString('hex'));
-    let encoded = '';
-    while (num > 0n) {
-      const remainder = Number(num % 58n);
-      num = num / 58n;
-      encoded = BASE58_ALPHABET[remainder] + encoded;
-    }
-    for (let i = 0; i < fullData.length && fullData[i] === 0; i++) {
-      encoded = '1' + encoded;
-    }
-    return encoded;
-  } catch (err) {
-    console.error("Provision address: failed to derive Tron address from private key:", err);
-    return process.env.TRON_HOT_WALLET_ADDRESS || '';
-  }
-}
-
-/**
- * Derives a Bitcoin Native SegWit address (bc1q...) directly from a private key
- */
-function getBtcSegwitAddressFromPrivateKey(privKey: string): string {
-  try {
-    let cleanHex = privKey.trim();
-    if (cleanHex.startsWith('0x') || cleanHex.startsWith('0X')) {
-      cleanHex = cleanHex.slice(2);
-    }
-
-    if (cleanHex.length !== 64 && (cleanHex.startsWith('5') || cleanHex.startsWith('K') || cleanHex.startsWith('L') || cleanHex.startsWith('c') || cleanHex.startsWith('9'))) {
-      const decoded = decodeBase58Check(cleanHex);
-      const rawKeyBytes = decoded.subarray(1, 33);
-      cleanHex = rawKeyBytes.toString('hex');
-    }
-
-    if (cleanHex.length !== 64) {
-      throw new Error(`Invalid private key length for BTC: ${cleanHex.length}`);
-    }
-
-    const signingKey = new ethers.SigningKey('0x' + cleanHex);
-    const compressedPubKey = signingKey.compressedPublicKey;
-    const pubKeyBuffer = Buffer.from(compressedPubKey.slice(2), 'hex');
-
-    const sha256Hash = crypto.createHash('sha256').update(pubKeyBuffer).digest();
-    const ripemd160Hash = crypto.createHash('ripemd160').update(sha256Hash).digest();
-
-    return encodeBech32('bc1', ripemd160Hash);
-  } catch (err) {
-    console.error("Provision address: failed to derive BTC address from private key:", err);
-    return process.env.BTC_HOT_WALLET_ADDRESS || '';
-  }
-}
-
-/**
- * Derives a Litecoin Native SegWit address (ltc1q...) directly from private key
- */
-function getLtcSegwitAddressFromPrivateKey(privKey: string): string {
-  try {
-    let cleanHex = privKey.trim();
-    if (cleanHex.startsWith('0x') || cleanHex.startsWith('0X')) {
-      cleanHex = cleanHex.slice(2);
-    }
-    if (cleanHex.length !== 64 && (cleanHex.startsWith('6') || cleanHex.startsWith('T') || cleanHex.startsWith('L') || cleanHex.startsWith('K') || cleanHex.startsWith('5'))) {
-      const decoded = decodeBase58Check(cleanHex);
-      cleanHex = decoded.subarray(1, 33).toString('hex');
-    }
-    const signingKey = new ethers.SigningKey('0x' + cleanHex);
-    const compressedPubKey = signingKey.compressedPublicKey;
-    const pubKeyBuffer = Buffer.from(compressedPubKey.slice(2), 'hex');
-    const sha256Hash = crypto.createHash('sha256').update(pubKeyBuffer).digest();
-    const ripemd160Hash = crypto.createHash('ripemd160').update(sha256Hash).digest();
-    return encodeBech32('ltc1', ripemd160Hash);
-  } catch (err) {
-    console.error("Provision address: failed to derive LTC address from private key:", err);
-    return process.env.LTC_HOT_WALLET_ADDRESS || '';
-  }
-}
-
-/**
- * Derives an EVM address (0x...) directly from a private key
- */
-function getEvmAddressFromPrivateKey(privKey: string): string {
-  try {
-    let cleanKey = privKey.trim();
-    if (!cleanKey.startsWith('0x')) {
-      cleanKey = `0x${cleanKey}`;
-    }
-    const wallet = new ethers.Wallet(cleanKey);
-    return wallet.address;
-  } catch (err) {
-    console.error("Provision address: failed to derive EVM address from private key:", err);
-    return process.env.EVM_HOT_WALLET_ADDRESS || '';
-  }
-}
 
 /**
  * Initializes Supabase Admin Client bypassing RLS policies
@@ -204,7 +32,7 @@ async function authenticateRequest(req: NextRequest, adminClient: SupabaseClient
 
   // 2. Authenticate via @supabase/ssr request cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -214,7 +42,7 @@ async function authenticateRequest(req: NextRequest, adminClient: SupabaseClient
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -237,7 +65,7 @@ async function authenticateRequest(req: NextRequest, adminClient: SupabaseClient
 
   // 3. Fallback: Parse Supabase session access tokens from cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const allCookies = cookieStore.getAll();
     for (const c of allCookies) {
       if (c.name.includes('auth-token') || c.name.startsWith('sb-')) {
@@ -275,149 +103,6 @@ function normalizeChain(input: string): 'EVM' | 'BTC' | 'LTC' | 'TRON' {
   if (['LTC', 'LITECOIN'].includes(norm)) return 'LTC';
   if (['TRON', 'TRX', 'TRC20', 'USDT-TRC20', 'USDT_TRC20'].includes(norm)) return 'TRON';
   return 'EVM';
-}
-
-/**
- * Derives on-chain address using configured XPUB, with hot wallet private key/address fallback
- */
-async function deriveAddressForChain(
-  chainCategory: 'EVM' | 'BTC' | 'LTC' | 'TRON',
-  derivationIndex: number,
-  specificAsset?: string
-): Promise<{ address: string; network: string; asset: string; derivationPath: string }> {
-  switch (chainCategory) {
-    case 'EVM': {
-      const asset = (specificAsset || 'USDT').toUpperCase();
-      const network = 'BEP20';
-      const derivationPath = `m/44'/60'/0'/0/${derivationIndex}`;
-
-      if (process.env.EVM_XPUB) {
-        try {
-          const hdNode = ethers.HDNodeWallet.fromExtendedKey(process.env.EVM_XPUB);
-          const child = hdNode.deriveChild(derivationIndex);
-          return { address: child.address, network, asset, derivationPath };
-        } catch {
-          const { address, path } = await deriveHDAddress(asset, network, process.env.EVM_XPUB, derivationIndex);
-          return { address, network, asset, derivationPath: path };
-        }
-      }
-
-      if (process.env.EVM_HOT_WALLET_PRIVATE_KEY) {
-        return {
-          address: getEvmAddressFromPrivateKey(process.env.EVM_HOT_WALLET_PRIVATE_KEY),
-          network,
-          asset,
-          derivationPath,
-        };
-      }
-
-      return {
-        address: process.env.EVM_HOT_WALLET_ADDRESS || '',
-        network,
-        asset,
-        derivationPath,
-      };
-    }
-
-    case 'BTC': {
-      const asset = 'BTC';
-      const network = 'BTC';
-      const derivationPath = `m/84'/0'/0'/0/${derivationIndex}`;
-
-      if (process.env.BTC_XPUB) {
-        try {
-          const { address, path } = await deriveHDAddress('BTC', 'BTC', process.env.BTC_XPUB, derivationIndex);
-          if (address && address.startsWith('bc1')) {
-            return { address, network, asset, derivationPath: path };
-          }
-        } catch (err) {
-          console.warn("BTC HD derivation warning:", err);
-        }
-      }
-
-      if (process.env.BTC_HOT_WALLET_PRIVATE_KEY) {
-        return {
-          address: getBtcSegwitAddressFromPrivateKey(process.env.BTC_HOT_WALLET_PRIVATE_KEY),
-          network,
-          asset,
-          derivationPath,
-        };
-      }
-
-      return {
-        address: process.env.BTC_HOT_WALLET_ADDRESS || '',
-        network,
-        asset,
-        derivationPath,
-      };
-    }
-
-    case 'LTC': {
-      const asset = 'LTC';
-      const network = 'LTC';
-      const derivationPath = `m/84'/2'/0'/0/${derivationIndex}`;
-
-      if (process.env.LTC_XPUB) {
-        try {
-          const { address, path } = await deriveHDAddress('LTC', 'LTC', process.env.LTC_XPUB, derivationIndex);
-          if (address && address.startsWith('ltc1')) {
-            return { address, network, asset, derivationPath: path };
-          }
-        } catch (err) {
-          console.warn("LTC HD derivation warning:", err);
-        }
-      }
-
-      if (process.env.LTC_HOT_WALLET_PRIVATE_KEY) {
-        return {
-          address: getLtcSegwitAddressFromPrivateKey(process.env.LTC_HOT_WALLET_PRIVATE_KEY),
-          network,
-          asset,
-          derivationPath,
-        };
-      }
-
-      return {
-        address: process.env.LTC_HOT_WALLET_ADDRESS || '',
-        network,
-        asset,
-        derivationPath,
-      };
-    }
-
-    case 'TRON': {
-      const asset = specificAsset === 'TRX' ? 'TRX' : 'USDT';
-      const network = 'TRC20';
-      const derivationPath = `m/44'/195'/0'/0/${derivationIndex}`;
-
-      if (process.env.TRON_XPUB) {
-        try {
-          const { address, path } = await deriveHDAddress(asset, network, process.env.TRON_XPUB, derivationIndex);
-          if (address && address.startsWith('T')) {
-            return { address, network, asset, derivationPath: path };
-          }
-        } catch (err) {
-          console.warn("TRON HD derivation warning:", err);
-        }
-      }
-
-      if (process.env.TRON_HOT_WALLET_PRIVATE_KEY) {
-        return {
-          address: getTronAddressFromPrivateKey(process.env.TRON_HOT_WALLET_PRIVATE_KEY),
-          network,
-          asset,
-          derivationPath,
-        };
-      }
-
-      return {
-        address: process.env.TRON_HOT_WALLET_ADDRESS || '',
-        network,
-        asset,
-        derivationPath,
-      };
-    }
-  }
 }
 
 /**

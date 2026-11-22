@@ -63,7 +63,7 @@ export default function MerchantsProgramPage() {
       toast({
         variant: 'destructive',
         title: 'Authentication Required',
-        description: 'Please sign in to apply for Paxones Verified Merchant status.',
+        description: 'Please sign in to apply for Wayones Verified Merchant status.',
       });
       return;
     }
@@ -102,7 +102,7 @@ export default function MerchantsProgramPage() {
       <div className="text-center space-y-4 max-w-3xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
           <Award className="h-4 w-4" />
-          <span>PaxOnes Verified Merchant Program</span>
+          <span>Wayones Verified Merchant Program</span>
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">

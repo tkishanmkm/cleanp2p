@@ -1,299 +1,254 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+
+export const dynamic = 'force-dynamic';
+
+type CanonicalFeedbackRow = {
+  id: string;
+  trade_id: string;
+  reviewer_id: string;
+  reviewee_id: string;
+  is_positive: boolean;
+  comment: string | null;
+  created_at: string;
+};
+
+function legacyFeedbackShape(row: CanonicalFeedbackRow, fromUsername: string | null) {
+  return {
+    id: row.id,
+    trade_id: row.trade_id,
+    from_user: row.reviewer_id,
+    from_username: fromUsername || 'Trader',
+    to_user: row.reviewee_id,
+    rating: row.is_positive ? 'positive' : 'negative',
+    is_positive: row.is_positive,
+    comment: row.comment || '',
+    created_at: row.created_at,
+  };
+}
+
+async function getAuthenticatedClient(req: Request) {
+  const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+  if (authHeader) {
+    const match = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+    if (!match || !match[1].trim() || match[1].trim().length > 8192) {
+      throw new Error('Invalid bearer authorization header.');
+    }
+    return createBearerClient(match[1].trim());
+  }
+  return createClient();
+}
+
+function validTradeId(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.length <= 128 &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const tradeId = searchParams.get('tradeId');
-    const userId = searchParams.get('userId');
-
-    if (!tradeId) {
-      return NextResponse.json({ error: 'tradeId is required' }, { status: 400 });
+    if (!validTradeId(tradeId)) {
+      return NextResponse.json({ error: 'A valid tradeId is required.' }, { status: 400 });
     }
 
-    let supabase = await createClient();
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7).trim();
-      supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        { global: { headers: { Authorization: `Bearer ${token}` } } }
-      );
-    }
-    const { data: { user } } = await supabase.auth.getUser();
-    const targetUserId = userId || user?.id;
-
-    if (!targetUserId) {
-      return NextResponse.json({ feedback: null });
+    const supabase = await getAuthenticatedClient(req);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized. Please log in.' }, { status: 401 });
     }
 
     const admin = getSupabaseAdminClient();
-    const { data: givenData, error: givenError } = await admin
-      .from('feedback')
-      .select('*')
-      .eq('trade_id', tradeId)
-      .eq('from_user', targetUserId)
+    const { data: trade, error: tradeError } = await admin
+      .from('trades')
+      .select('id,buyer_id,seller_id')
+      .eq('id', tradeId)
       .maybeSingle();
 
-    if (givenError && givenError.code !== 'PGRST116') {
-      console.warn('Feedback query error:', givenError);
+    if (tradeError) {
+      console.error('[TRADE_FEEDBACK] Trade access lookup failed.', { code: tradeError.code || null });
+      return NextResponse.json({ error: 'Unable to verify trade access.' }, { status: 503 });
+    }
+    if (!trade || (user.id !== trade.buyer_id && user.id !== trade.seller_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data: recData, error: recError } = await admin
-      .from('feedback')
-      .select('*')
+    // feedbacks is the only active review store. The URL userId parameter is
+    // intentionally ignored; the authenticated user determines visibility.
+    const { data: rows, error: feedbackError } = await admin
+      .from('feedbacks')
+      .select('id,trade_id,reviewer_id,reviewee_id,is_positive,comment,created_at')
       .eq('trade_id', tradeId)
-      .eq('to_user', targetUserId)
-      .maybeSingle();
+      .order('created_at', { ascending: true });
 
-    if (recError && recError.code !== 'PGRST116') {
-      console.warn('Received feedback query error:', recError);
+    if (feedbackError) {
+      console.error('[TRADE_FEEDBACK] Canonical feedback read failed.', { code: feedbackError.code || null });
+      return NextResponse.json({ error: 'Unable to load trade feedback.' }, { status: 503 });
     }
 
-    return NextResponse.json({
-      feedback: givenData || null,
-      receivedFeedback: recData || null,
+    const feedbackRows = Array.isArray(rows) ? rows as CanonicalFeedbackRow[] : [];
+    const reviewerIds = Array.from(new Set(feedbackRows.map((row) => row.reviewer_id).filter(Boolean)));
+    const reviewerNames = new Map<string, string | null>();
+    if (reviewerIds.length > 0) {
+      const { data: profiles, error: reviewerError } = await admin
+        .from('public_profiles')
+        .select('id,username')
+        .in('id', reviewerIds);
+      if (reviewerError) {
+        console.error('[TRADE_FEEDBACK] Reviewer label lookup failed.', { code: reviewerError.code || null });
+      }
+      for (const profile of profiles || []) {
+        reviewerNames.set(profile.id, profile.username || null);
+      }
+    }
+
+    let feedback: ReturnType<typeof legacyFeedbackShape> | null = null;
+    let receivedFeedback: ReturnType<typeof legacyFeedbackShape> | null = null;
+    for (const row of feedbackRows) {
+      const mapped = legacyFeedbackShape(row, reviewerNames.get(row.reviewer_id) || null);
+      if (row.reviewer_id === user.id) feedback = mapped;
+      if (row.reviewee_id === user.id) receivedFeedback = mapped;
+    }
+
+    return NextResponse.json({ feedback, receivedFeedback }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('[TRADE_FEEDBACK] Read failed:', error instanceof Error ? error.name : 'UnknownError');
+    return NextResponse.json({ error: 'Unable to load trade feedback.' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    let supabase = await createClient();
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7).trim();
-      supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        { global: { headers: { Authorization: `Bearer ${token}` } } }
-      );
-    }
+    const supabase = await getAuthenticatedClient(req);
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in.' }, { status: 401 });
     }
 
-    const body = await req.json();
-    const { tradeId, rating, comment, counterpartId } = body;
-
-    if (!tradeId) {
-      return NextResponse.json({ error: 'tradeId is required' }, { status: 400 });
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
     }
 
-    if (!rating || !['positive', 'negative'].includes(rating)) {
-      return NextResponse.json({ error: 'Valid rating (positive or negative) is required' }, { status: 400 });
+    const tradeId = body.tradeId;
+    const rating = body.rating;
+    const comment = typeof body.comment === 'string' ? body.comment.trim() : '';
+    if (!validTradeId(tradeId)) {
+      return NextResponse.json({ error: 'A valid tradeId is required.' }, { status: 400 });
     }
-
-    if (!comment || typeof comment !== 'string' || comment.trim().length === 0) {
-      return NextResponse.json({ error: 'Feedback comment is required' }, { status: 400 });
+    if (rating !== 'positive' && rating !== 'negative') {
+      return NextResponse.json({ error: 'Valid rating (positive or negative) is required.' }, { status: 400 });
+    }
+    if (!comment || comment.length > 2000) {
+      return NextResponse.json({ error: 'Feedback comment must be between 1 and 2000 characters.' }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
-
-    // 1. Fetch trade details to verify participants
-    const { data: trade, error: tradeErr } = await admin
+    const { data: trade, error: tradeError } = await admin
       .from('trades')
-      .select('*')
+      .select('id,buyer_id,seller_id,status,escrow_status,completed_at,released_at,trade_id')
       .eq('id', tradeId)
       .maybeSingle();
 
-    if (tradeErr || !trade) {
-      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+    if (tradeError) {
+      console.error('[TRADE_FEEDBACK] Trade lookup failed.', { code: tradeError.code || null });
+      return NextResponse.json({ error: 'Unable to verify trade before feedback.' }, { status: 503 });
+    }
+    if (!trade) {
+      return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
     }
 
-    const buyerId = trade.buyer_id || trade.buyerId;
-    const sellerId = trade.seller_id || trade.sellerId;
-
+    const buyerId = trade.buyer_id;
+    const sellerId = trade.seller_id;
     if (user.id !== buyerId && user.id !== sellerId) {
-      return NextResponse.json({ error: 'You are not a participant in this trade' }, { status: 403 });
+      return NextResponse.json({ error: 'You are not a participant in this trade.' }, { status: 403 });
     }
 
-    // Verify trade is completed/released before feedback can be given
-    const rawStatus = String(trade.status || '').toLowerCase();
-    const rawEscrowStatus = String(trade.escrow_status || '').toUpperCase();
-    const isCompleted =
-      ['completed', 'released'].includes(rawStatus) ||
+    const rawStatus = String(trade.status || '').trim().toLowerCase();
+    const rawEscrowStatus = String(trade.escrow_status || '').trim().toUpperCase();
+    const completed = ['completed', 'released'].includes(rawStatus) ||
       ['COMPLETED', 'RELEASED'].includes(rawEscrowStatus) ||
       Boolean(trade.completed_at || trade.released_at);
 
-    if (!isCompleted) {
+    if (!completed) {
       return NextResponse.json({ error: 'Feedback can only be submitted for completed or released trades.' }, { status: 400 });
     }
 
-    const effectiveCounterpartId = counterpartId || (user.id === buyerId ? sellerId : buyerId);
-    if (user.id === effectiveCounterpartId) {
-      return NextResponse.json({ error: 'Cannot submit feedback for yourself.' }, { status: 400 });
+    const expectedCounterpartId = user.id === buyerId ? sellerId : buyerId;
+    if (!expectedCounterpartId || expectedCounterpartId === user.id) {
+      return NextResponse.json({ error: 'Trade counterparty could not be verified.' }, { status: 409 });
+    }
+    if (body.counterpartId !== undefined && body.counterpartId !== null &&
+        body.counterpartId !== expectedCounterpartId) {
+      return NextResponse.json({ error: 'Feedback recipient must be the other participant in this trade.' }, { status: 403 });
     }
 
-    // Get current user's username
-    const { data: userProfile } = await admin
-      .from('profiles')
+    const { data: existing, error: existingError } = await admin
+      .from('feedbacks')
+      .select('id')
+      .eq('trade_id', tradeId)
+      .eq('reviewer_id', user.id)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('[TRADE_FEEDBACK] Duplicate lookup failed.', { code: existingError.code || null });
+      return NextResponse.json({ error: 'Unable to verify whether feedback already exists.' }, { status: 503 });
+    }
+    if (existing) {
+      return NextResponse.json({ error: 'You have already submitted feedback for this trade. Each participant may submit one review.' }, { status: 409 });
+    }
+
+    // Use the caller's authenticated Supabase client. The database INSERT
+    // policy independently verifies completion and the exact counterparty.
+    const { data: inserted, error: insertError } = await supabase
+      .from('feedbacks')
+      .insert({
+        trade_id: tradeId,
+        reviewer_id: user.id,
+        reviewee_id: expectedCounterpartId,
+        is_positive: rating === 'positive',
+        comment,
+      })
+      .select('id,trade_id,reviewer_id,reviewee_id,is_positive,comment,created_at')
+      .single();
+
+    if (insertError || !inserted) {
+      if (insertError?.code === '23505') {
+        return NextResponse.json({ error: 'You have already submitted feedback for this trade.' }, { status: 409 });
+      }
+      console.error('[TRADE_FEEDBACK] Canonical feedback insert failed.', { code: insertError?.code || null });
+      return NextResponse.json({ error: 'Unable to save feedback.' }, { status: 400 });
+    }
+
+    const { data: reviewer } = await admin
+      .from('public_profiles')
       .select('username')
       .eq('id', user.id)
       .maybeSingle();
 
-    const fromUsername = userProfile?.username || user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
-
-    // 2. Check if feedback already exists for this trade + from_user
-    const { data: existingFeedback } = await admin
-      .from('feedback')
-      .select('*')
-      .eq('trade_id', tradeId)
-      .eq('from_user', user.id)
-      .maybeSingle();
-
-    let savedFeedback: any = null;
-    const isPositive = rating === 'positive';
-
-    if (existingFeedback?.id) {
-      // First attempt update with standard columns
-      const { data: updated, error: updateErr } = await admin
-        .from('feedback')
-        .update({
-          rating,
-          is_positive: isPositive,
-          comment: comment.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingFeedback.id)
-        .select()
-        .maybeSingle();
-
-      if (updateErr) {
-        // If error mentions column is_positive, fallback to update without is_positive
-        if (updateErr.message?.includes('is_positive') || (updateErr as any)?.code === 'PGRST204') {
-          const { data: fbFallback, error: fallbackErr } = await admin
-            .from('feedback')
-            .update({
-              rating,
-              comment: comment.trim(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', existingFeedback.id)
-            .select()
-            .single();
-          if (fallbackErr) throw fallbackErr;
-          savedFeedback = fbFallback;
-        } else {
-          throw updateErr;
-        }
-      } else {
-        savedFeedback = updated;
-      }
-    } else {
-      const { data: inserted, error: insertErr } = await admin
-        .from('feedback')
-        .insert({
-          trade_id: tradeId,
-          from_user: user.id,
-          from_username: fromUsername,
-          to_user: effectiveCounterpartId,
-          rating,
-          is_positive: isPositive,
-          comment: comment.trim(),
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .maybeSingle();
-
-      if (insertErr) {
-        // If error mentions column is_positive, fallback to insert without is_positive
-        if (insertErr.message?.includes('is_positive') || (insertErr as any)?.code === 'PGRST204') {
-          const { data: fbFallback, error: fallbackErr } = await admin
-            .from('feedback')
-            .insert({
-              trade_id: tradeId,
-              from_user: user.id,
-              from_username: fromUsername,
-              to_user: effectiveCounterpartId,
-              rating,
-              comment: comment.trim(),
-              created_at: new Date().toISOString(),
-            })
-            .select()
-            .single();
-          if (fallbackErr) throw fallbackErr;
-          savedFeedback = fbFallback;
-        } else {
-          throw insertErr;
-        }
-      } else {
-        savedFeedback = inserted;
-      }
-    }
-
-    // 3. Update counterparty's profile stats (positive_feedback, negative_feedback, feedback_score)
-    const { data: allFb } = await admin
-      .from('feedback')
-      .select('rating, is_positive')
-      .eq('to_user', effectiveCounterpartId);
-
-    if (allFb) {
-      const posCount = allFb.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
-      const negCount = allFb.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
-      const total = posCount + negCount;
-      const score = total > 0 ? Math.round((posCount / total) * 100) : 100;
-
-      await admin
-        .from('profiles')
-        .update({
-          positive_feedback: posCount,
-          negative_feedback: negCount,
-          feedback_score: score,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', effectiveCounterpartId);
-    }
-
-    // 4. Post automated system message into trade chat
-    const ratingEmoji = rating === 'positive' ? '👍 Positive' : '👎 Negative';
-    const systemChatMessage = `@${fromUsername} left ${rating} feedback for this trade.\nRating: ${ratingEmoji}\nReview: "${comment.trim()}"`;
-
-    try {
-      await admin.from('trade_messages').insert({
-        trade_id: tradeId,
-        sender_id: '00000000-0000-0000-0000-000000000000',
-        sender_username: 'Paxones System',
-        message: systemChatMessage,
-        is_system: true,
-        is_moderator: true,
-        created_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.warn('Notice posting feedback system message:', e);
-    }
-
-    // 5. Insert notification for counterpart
-    const publicTradeRef = trade.trade_id || tradeId.substring(0, 8);
-    try {
-      await admin.from('notifications').insert({
-        user_id: effectiveCounterpartId,
-        title: 'Feedback Received',
-        message: `@${fromUsername} left you ${rating} feedback for trade #${publicTradeRef}: "${comment.trim().substring(0, 50)}${comment.length > 50 ? '...' : ''}"`,
-        type: 'feedback',
-        is_read: false,
-        metadata: { link: `/trade/${tradeId}` },
-        created_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.warn('Notice sending feedback notification:', e);
-    }
-
-    return NextResponse.json({
-      success: true,
-      feedback: savedFeedback,
-    });
-  } catch (error: any) {
-    console.error('Feedback submit error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to submit feedback' },
-      { status: 500 }
+    const savedFeedback = legacyFeedbackShape(
+      inserted as CanonicalFeedbackRow,
+      reviewer?.username || user.user_metadata?.username || user.email?.split('@')[0] || null
     );
+
+    // A chat notice is best-effort and cannot roll back the canonical review.
+    const { error: messageError } = await supabase.from('trade_messages').insert({
+      trade_id: tradeId,
+      sender_id: user.id,
+      message: `${rating === 'positive' ? 'Positive' : 'Negative'} feedback submitted.`,
+    });
+    if (messageError) {
+      console.warn('[TRADE_FEEDBACK] Chat notice could not be posted.', { code: messageError.code || null });
+    }
+
+    return NextResponse.json({ success: true, feedback: savedFeedback }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error: unknown) {
+    console.error('[TRADE_FEEDBACK] Submit failed:', error instanceof Error ? error.name : 'UnknownError');
+    return NextResponse.json({ error: 'Failed to submit feedback.' }, { status: 500 });
   }
 }

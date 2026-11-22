@@ -1,0 +1,1 @@
+ALTER TABLE public.user_2fa_pending_enrollments ADD CONSTRAINT user_2fa_pending_enrollments_secret_encrypted_check CHECK (encrypted_secret IS NULL OR btrim(encrypted_secret) = '' OR encrypted_secret ~ '^v1:enc:[0-9a-f]{24}:[0-9a-f]{32}:([0-9a-f]{2})+$');

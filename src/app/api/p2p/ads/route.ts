@@ -1,9 +1,8 @@
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
-import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { generateAdId } from '@/lib/id-generator';
-import { calculateMinimumFiatAmount } from '@/lib/currency';
+import { getMinimumFiatAmountFromUsd } from '@/lib/currency.server';
+import { FIAT_CURRENCIES } from '@/lib/currencies';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
@@ -11,59 +10,31 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader !== null ? /^Bearer\s+(.+)$/i.exec(authHeader) : null;
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
+    if (authHeader !== null && !bearerToken) {
+      return NextResponse.json({ error: 'A valid Bearer authorization token is required.' }, { status: 401 });
+    }
+    const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            } catch {}
-          },
-        },
-      }
-    );
-
-    const body = await request.json();
-
-    // Support Bearer token header if provided by frontend
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
-    // 1. Authenticate user session
-    let user: any = null;
-    let authError: any = null;
-
-    if (bearerToken) {
-      const tokenAuth = await supabase.auth.getUser(bearerToken);
-      user = tokenAuth.data?.user;
-      authError = tokenAuth.error;
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 16 * 1024) {
+      return NextResponse.json({ error: 'Advertisement request is too large.' }, { status: 413 });
+    }
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid advertisement JSON object is required.' }, { status: 400 });
     }
 
-    if (!user) {
-      const cookieAuth = await supabase.auth.getUser();
-      user = cookieAuth.data?.user;
-      authError = cookieAuth.error;
-    }
+    // Validate the one selected credential source. A rejected Bearer token
+    // must not fall back to a different authenticated cookie.
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user || null;
 
-    if (!user) {
+    if (authError || !user) {
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message || 'Authentication required'
-        }, 
+        { error: 'No active session found. Please refresh or log in again.' },
         { status: 401 }
       );
     }
@@ -78,44 +49,87 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
-    try {
-      const admin = getSupabaseAdminClient();
-      const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
-      const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
-
-      await admin
-        .from('profiles')
-        .upsert(
-          {
-            id: user.id,
-            email: user.email,
-            username: cleanUsername,
-            full_name: profileName,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id', ignoreDuplicates: true }
-        );
-    } catch (profileUpsertErr) {
-      console.warn('Profile auto-ensure warning:', profileUpsertErr);
+    // Require the profile created by the verified signup flow. Ad creation must not
+    // auto-provision identity or account records from user-editable Auth metadata.
+    // Enforce account restrictions at the API boundary as well as in database triggers.
+    const accountAdmin = getSupabaseAdminClient();
+    const { data: accountProfile, error: accountProfileError } = await accountAdmin
+      .from('profiles')
+      .select('is_banned, is_restricted, is_suspended, is_on_hold, is_emergency_frozen, is_minor_restricted, status, account_status')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (accountProfileError || !accountProfile) {
+      console.error('[P2P_AD_CREATE] account eligibility lookup failed:', accountProfileError?.code || 'profile_missing');
+      return NextResponse.json({ error: 'Account eligibility could not be verified. Please retry.', code: 'ACCOUNT_STATUS_UNAVAILABLE' }, { status: 503 });
+    }
+    const profileStatus = String(accountProfile.status || '').toLowerCase();
+    const accountStatus = String(accountProfile.account_status || '').toUpperCase();
+    if (
+      accountProfile.is_banned === true ||
+      accountProfile.is_restricted === true ||
+      accountProfile.is_suspended === true ||
+      accountProfile.is_on_hold === true ||
+      accountProfile.is_emergency_frozen === true ||
+      accountProfile.is_minor_restricted === true ||
+      ['banned', 'restricted', 'suspended', 'deleted', 'inactive', 'on_hold', 'hold'].includes(profileStatus) ||
+      ['BANNED', 'RESTRICTED', 'SUSPENDED', 'ON_HOLD', 'HOLD', 'BLOCKED', 'DELETION_PENDING', 'DELETED', 'INACTIVE'].includes(accountStatus)
+    ) {
+      return NextResponse.json({ error: 'Your account is not allowed to create new advertisements.', code: 'ACCOUNT_AD_ACCESS_BLOCKED' }, { status: 403 });
     }
 
-    const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
-    const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
-    const adSide = resolveTradeType(body);
+    const readString = (value: unknown): string =>
+      typeof value === 'string' ? value.trim() : '';
+    const coinType = readString(
+      body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT'
+    ).toUpperCase();
+    const fiatType = readString(
+      body.fiat || body.fiat_currency || body.fiat_symbol || 'USD'
+    ).toUpperCase();
+    const supportedAssets = new Set(['USDT', 'BTC', 'ETH', 'LTC']);
 
-    if (!adSide) {
+    if (!supportedAssets.has(coinType)) {
+      return NextResponse.json({ error: 'Unsupported cryptocurrency.', code: 'UNSUPPORTED_ASSET' }, { status: 400 });
+    }
+    if (!FIAT_CURRENCIES.some((fiat) => fiat.code.toUpperCase() === fiatType)) {
+      return NextResponse.json({ error: 'Unsupported fiat currency.', code: 'UNSUPPORTED_FIAT' }, { status: 400 });
+    }
+
+    const adSide = resolveTradeType(body);
+    if (adSide !== 'BUY') {
       return NextResponse.json(
-        { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
-        { status: 400 }
+        {
+          success: false,
+          error: 'SELL advertisements are temporarily unavailable until atomic crypto inventory reservation is enabled.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+        },
+        { status: 503 }
       );
     }
 
-    const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
-    const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+    const toFiniteNumber = (value: unknown): number | null => {
+      if (typeof value !== 'number' && typeof value !== 'string') return null;
+      if (typeof value === 'string' && value.trim() === '') return null;
+      const result = Number(value);
+      return Number.isFinite(result) ? result : null;
+    };
+    const requestedMax = toFiniteNumber(body.max_amount ?? body.max_limit ?? body.maxAmount);
+    const requestedMin = toFiniteNumber(body.min_amount ?? body.min_limit ?? body.minAmount);
+    if (
+      requestedMin === null || requestedMax === null ||
+      requestedMin <= 0 || requestedMax <= 0 || requestedMax < requestedMin ||
+      requestedMin >= 1e18 || requestedMax >= 1e18
+    ) {
+      return NextResponse.json({ error: 'Valid positive minimum and maximum trade limits are required.' }, { status: 400 });
+    }
 
-    // Enforce dynamic minimum limit equivalent to at least $10.00 USD
-    const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
+    const dynamicMinThreshold = await getMinimumFiatAmountFromUsd(10.00, fiatType);
+    if (dynamicMinThreshold === null) {
+      return NextResponse.json({
+        success: false,
+        error: `The USD conversion rate for ${fiatType} is temporarily unavailable. Ad creation is paused to verify the minimum trade amount.`,
+        code: 'FIAT_RATE_UNAVAILABLE',
+      }, { status: 503 });
+    }
     if (requestedMin < dynamicMinThreshold) {
       return NextResponse.json({
         error: `Minimum trade limit must be at least ${dynamicMinThreshold} ${fiatType} (equivalent to $10.00 USD).`,
@@ -123,325 +137,224 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
-    const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
-    const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
-    const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
-    const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
-      ? body.payment_methods
-      : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
-
-    // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
-    const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
-
-    if (isFixedPricing) {
-      if (priceVal === null || isNaN(priceVal) || priceVal <= 0) {
-        return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
-      }
-
-      const adminClient = getSupabaseAdminClient();
-      const { data: marketRow, error: marketError } = await adminClient
-        .from('crypto_market_prices')
-        .select('price_in_fiat, updated_at')
-        .eq('asset_symbol', coinType)
-        .eq('fiat_symbol', fiatType)
-        .maybeSingle();
-
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
-        return NextResponse.json(
-          { error: `Market reference price is currently unavailable for ${coinType}/${fiatType}. Please try again later.` },
-          { status: 400 }
-        );
-      }
-
-      const refPrice = Number(marketRow.price_in_fiat);
-      const minAllowedPrice = refPrice * 0.50;
-      const maxAllowedPrice = refPrice * 1.50;
-
-      if (priceVal < minAllowedPrice || priceVal > maxAllowedPrice) {
-        return NextResponse.json(
-          {
-            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${fiatType}).`,
-          },
-          { status: 400 }
-        );
-      }
+    const rawFixedFlag = body.is_fixed;
+    if (rawFixedFlag !== undefined && typeof rawFixedFlag !== 'boolean') {
+      return NextResponse.json({ error: 'is_fixed must be a boolean.' }, { status: 400 });
+    }
+    const rawPricingMode = body.pricing_type ?? body.rate_type;
+    let pricingType: 'FIXED' | 'FLOAT';
+    if (rawPricingMode !== undefined && rawPricingMode !== null && rawPricingMode !== '') {
+      const normalizedMode = String(rawPricingMode).trim().toUpperCase();
+      if (normalizedMode === 'FIXED') pricingType = 'FIXED';
+      else if (normalizedMode === 'FLOAT' || normalizedMode === 'FLOATING' || normalizedMode === 'MARKET') pricingType = 'FLOAT';
+      else return NextResponse.json({ error: 'Pricing type must be FIXED or FLOAT.' }, { status: 400 });
     } else {
-      // Floating/margin pricing validation (-50% to +50%)
-      if (marginVal < -50 || marginVal > 50) {
-        return NextResponse.json(
-          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
-          { status: 400 }
-        );
+      pricingType = rawFixedFlag === true ? 'FIXED' : 'FLOAT';
+    }
+    if (rawFixedFlag !== undefined && (pricingType === 'FIXED') !== rawFixedFlag) {
+      return NextResponse.json({ error: 'Pricing type fields conflict.' }, { status: 400 });
+    }
+
+    const requireFullNameValue = body.require_full_name_verified ?? body.requireFullNameVerified;
+    const requireVerifiedUsersValue = body.require_verified_users ?? body.requireVerifiedUsers;
+    if (requireFullNameValue !== undefined && typeof requireFullNameValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_full_name_verified must be a boolean.' }, { status: 400 });
+    }
+    if (requireVerifiedUsersValue !== undefined && typeof requireVerifiedUsersValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_verified_users must be a boolean.' }, { status: 400 });
+    }
+    const marginVal = toFiniteNumber(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
+    if (marginVal === null || marginVal < -50 || marginVal > 50) {
+      return NextResponse.json({ error: 'Margin percentage must be between -50% and +50%.' }, { status: 400 });
+    }
+
+    const rawPaymentWindow = Number(body.payment_window ?? body.payment_window_minutes ?? 30);
+    if (!Number.isInteger(rawPaymentWindow) || rawPaymentWindow < 30 || rawPaymentWindow > 1440) {
+      return NextResponse.json({ error: 'Payment window must be between 30 and 1440 minutes.' }, { status: 400 });
+    }
+
+    const rawPaymentMethods: unknown[] = Array.isArray(body.payment_methods)
+      ? body.payment_methods
+      : Array.isArray(body.paymentMethods)
+        ? body.paymentMethods
+        : typeof body.payment_method === 'string'
+          ? [body.payment_method]
+          : [];
+    if (rawPaymentMethods.length < 1 || rawPaymentMethods.length > 20 ||
+        rawPaymentMethods.some((method) => typeof method !== 'string' || !method.trim() || method.trim().length > 100)) {
+      return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
+    }
+    const paymentMethods = Array.from(new Set(rawPaymentMethods.map((method) => (method as string).trim())));
+    if (paymentMethods.length < 1 || paymentMethods.length > 20) {
+      return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
+    }
+
+    const adminClient = getSupabaseAdminClient();
+    const { data: marketRow, error: marketError } = await adminClient
+      .from('crypto_market_prices')
+      .select('price_in_fiat, updated_at')
+      .eq('asset_symbol', coinType)
+      .eq('fiat_symbol', fiatType)
+      .maybeSingle();
+
+    if (marketError || !marketRow) {
+      return NextResponse.json({ error: `Market reference price is unavailable for ${coinType}/${fiatType}.`, code: 'MARKET_PRICE_UNAVAILABLE' }, { status: 503 });
+    }
+    const referencePrice = toFiniteNumber(marketRow.price_in_fiat);
+    const marketUpdatedAt = marketRow.updated_at ? Date.parse(marketRow.updated_at) : Number.NaN;
+    const marketAgeMs = Date.now() - marketUpdatedAt;
+    if (
+      referencePrice === null || referencePrice <= 0 ||
+      !Number.isFinite(marketUpdatedAt) ||
+      marketAgeMs < -60_000 || marketAgeMs > 10 * 60_000
+    ) {
+      return NextResponse.json({ error: `A current market reference price is unavailable for ${coinType}/${fiatType}.`, code: 'MARKET_PRICE_STALE' }, { status: 503 });
+    }
+
+    let priceVal: number;
+    if (pricingType === 'FIXED') {
+      const fixedPrice = toFiniteNumber(body.price ?? body.fixed_price ?? body.fixedPrice);
+      if (fixedPrice === null || fixedPrice <= 0 || fixedPrice >= 1e18) {
+        return NextResponse.json({ error: 'A finite positive fixed price is required.' }, { status: 400 });
+      }
+      const minAllowedPrice = referencePrice * 0.5;
+      const maxAllowedPrice = referencePrice * 1.5;
+      if (fixedPrice < minAllowedPrice || fixedPrice > maxAllowedPrice) {
+        return NextResponse.json({
+          error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${fiatType}).`,
+          code: 'FIXED_PRICE_OUTSIDE_MARKET_RANGE',
+        }, { status: 400 });
+      }
+      priceVal = fixedPrice;
+    } else {
+      priceVal = referencePrice * (1 + marginVal / 100);
+      if (!Number.isFinite(priceVal) || priceVal <= 0 || priceVal >= 1e18) {
+        return NextResponse.json({ error: 'The calculated floating ad price is invalid.' }, { status: 400 });
       }
     }
 
-    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
-    if (adSide === 'SELL') {
-      const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
+    const optionalText = (value: unknown, maxLength: number): string | null => {
+      if (value === undefined || value === null) return null;
+      if (typeof value !== 'string') return null;
+      const clean = value.trim();
+      return clean.length <= maxLength ? clean : null;
+    };
+    const terms = optionalText(body.terms ?? body.terms_conditions ?? body.termsAndConditions ?? '', 2000);
+    const offerLabel = optionalText(body.offer_label ?? body.label ?? body.offerLabel ?? '', 80);
+    const autoReply = optionalText(body.auto_reply ?? body.autoReply ?? '', 1000);
+    if (terms === null || offerLabel === null || autoReply === null) {
+      return NextResponse.json({ error: 'Advertisement text fields exceed their allowed size.' }, { status: 400 });
+    }
 
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
+    const normalizeCountryList = (value: unknown): string[] | null => {
+      if (value === undefined || value === null) return [];
+      if (!Array.isArray(value) || value.length > 100) return null;
+      const countries = value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim().toLowerCase());
+      if (countries.length !== value.length || countries.some((item) => !/^[a-z]{2}$/.test(item))) return null;
+      return Array.from(new Set(countries));
+    };
+    const targetedCountries = normalizeCountryList(body.targeted_countries ?? body.targetedCountries);
+    const blockedCountries = normalizeCountryList(body.blocked_countries ?? body.blockedCountries);
+    if (targetedCountries === null || blockedCountries === null) {
+      return NextResponse.json({ error: 'Country restrictions must contain valid ISO alpha-2 codes.' }, { status: 400 });
+    }
 
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
+    const rawTags = body.ad_tags ?? body.tags;
+    if (rawTags !== undefined && rawTags !== null && !Array.isArray(rawTags)) {
+      return NextResponse.json({ error: 'Advertisement tags must be a list.' }, { status: 400 });
+    }
+    const tagsInput = Array.isArray(rawTags) ? rawTags : [];
+    if (tagsInput.length > 20 || tagsInput.some((tag) => typeof tag !== 'string' || tag.trim().length > 40)) {
+      return NextResponse.json({ error: 'Advertisement tags must contain at most twenty strings of forty characters each.' }, { status: 400 });
+    }
+    const tags = Array.from(new Set(tagsInput.map((tag: string) => tag.trim()).filter(Boolean)));
 
-        // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-
-        if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain')
-          .eq('user_id', user.id);
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
-      }
-
-      const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
-      const minCoinRequired = requestedMin / effectiveUnitPrice;
-
-      if (availableBalance < minCoinRequired) {
-        return NextResponse.json({
-          error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
-          code: 'INSUFFICIENT_BALANCE',
-        }, { status: 400 });
-      }
+    const rawMinimumTrades = Number(body.min_completed_trades ?? body.min_completed_trades_req ?? 0);
+    if (!Number.isInteger(rawMinimumTrades) || rawMinimumTrades < 0 || rawMinimumTrades > 1000000) {
+      return NextResponse.json({ error: 'Minimum completed trades must be a valid non-negative integer.' }, { status: 400 });
     }
 
     const uniqueAdId = generateAdId();
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('create_buy_ad_atomic', {
+      p_public_ad_id: uniqueAdId,
+      p_asset: coinType,
+      p_fiat: fiatType,
+      p_price: priceVal,
+      p_min_amount: requestedMin,
+      p_max_amount: requestedMax,
+      p_pricing_type: pricingType,
+      p_margin: marginVal,
+      p_payment_methods: paymentMethods,
+      p_payment_window: rawPaymentWindow,
+      p_terms: terms,
+      p_offer_label: offerLabel,
+      p_auto_reply: autoReply,
+      p_tags: tags,
+      p_targeted_countries: targetedCountries,
+      p_blocked_countries: blockedCountries,
+      p_min_completed_trades: rawMinimumTrades,
+      p_require_full_name_verified: requireFullNameValue === true,
+      p_require_verified_users: requireVerifiedUsersValue === true,
+    });
 
-    const resolvedTerms = body.terms || body.terms_conditions || body.termsAndConditions || '';
-    const resolvedLabel = body.offer_label || body.label || body.offerLabel || '';
-    const resolvedTags = Array.isArray(body.ad_tags) ? body.ad_tags : (Array.isArray(body.tags) ? body.tags : []);
-
-    // Standard base table payload for `public.ads` and `public.p2p_ads`
-    const basePayload: Record<string, any> = {
-      ad_id: uniqueAdId,
-      public_id: uniqueAdId,
-      user_id: user.id,
-      type: adSide,
-      trade_type: adSide,
-      asset_symbol: coinType,
-      fiat_symbol: fiatType,
-      price: priceVal,
-      unit_price: priceVal,
-      pricing_type: pricingType,
-      margin: marginVal,
-      min_limit: requestedMin,
-      max_limit: requestedMax,
-      total_amount: requestedMax,
-      available_amount: requestedMax,
-      payment_methods: paymentMethods,
-      payment_window: paymentWindow,
-      
-      // Mapped fields for both schema naming conventions
-      terms: resolvedTerms,
-      offer_label: resolvedLabel,
-      label: resolvedLabel,
-      ad_tags: resolvedTags,
-      tags: resolvedTags,
-      auto_reply: body.auto_reply || body.autoReply || '',
-      
-      is_active: true,
-      active: true,
-      status: 'active',
-      // Include common aliases to satisfy any schema variations
-      coin: coinType,
-      crypto: coinType,
-      fiat: fiatType,
-      fiat_currency: fiatType,
-      min_amount: requestedMin,
-      max_amount: requestedMax,
-      rate_percent: marginVal,
-      is_fixed: pricingType === 'FIXED',
-    };
-
-    // 2. Insert into `ads` table first using the user's authenticated Supabase client
-    let data: any = null;
-    let dbError: any = null;
-
-    const { data: insertResult, error: insertError } = await supabase
-      .from('ads')
-      .insert([basePayload])
-      .select()
-      .single();
-
-    if (!insertError) {
-      data = insertResult;
-    } else {
-      dbError = insertError;
-      console.warn('Initial insert into `ads` failed:', insertError.message);
-
-      // Check if error is due to an unknown column in `ads` (code PGRST204 or 42703)
-      // Attempt simplified canonical payload
-      if (insertError.code === 'PGRST204' || insertError.message?.includes('schema cache') || insertError.message?.includes('column')) {
-        const minimalPayload: Record<string, any> = {
-          user_id: user.id,
-          type: adSide,
-          asset_symbol: coinType,
-          fiat_symbol: fiatType,
-          price: priceVal,
-          min_limit: requestedMin,
-          max_limit: requestedMax,
-          payment_methods: paymentMethods,
-          is_active: true,
-          terms: resolvedTerms,
-          offer_label: resolvedLabel,
-          label: resolvedLabel,
-          ad_tags: resolvedTags,
-          tags: resolvedTags,
-        };
-
-        const { data: minResult, error: minError } = await supabase
-          .from('ads')
-          .insert([minimalPayload])
-          .select()
-          .single();
-
-        if (!minError) {
-          data = minResult;
-          dbError = null;
-        } else {
-          dbError = minError;
-        }
-      }
-
-      // If RLS blocked the user or table not accessible via client, try service role admin client
-      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
-        try {
-          const admin = getSupabaseAdminClient();
-          const { data: adminResult, error: adminError } = await admin
-            .from('ads')
-            .insert([basePayload])
-            .select()
-            .single();
-
-          if (!adminError) {
-            data = adminResult;
-            dbError = null;
-          } else {
-            // Try minimal payload with admin
-            const minAdminPayload: Record<string, any> = {
-              user_id: user.id,
-              type: adSide,
-              asset_symbol: coinType,
-              fiat_symbol: fiatType,
-              price: priceVal,
-              min_limit: requestedMin,
-              max_limit: requestedMax,
-              payment_methods: paymentMethods,
-              is_active: true,
-              terms: resolvedTerms,
-              offer_label: resolvedLabel,
-              label: resolvedLabel,
-              ad_tags: resolvedTags,
-              tags: resolvedTags,
-            };
-            const { data: minAdminRes, error: minAdminErr } = await admin
-              .from('ads')
-              .insert([minAdminPayload])
-              .select()
-              .single();
-
-            if (!minAdminErr) {
-              data = minAdminRes;
-              dbError = null;
-            } else {
-              dbError = minAdminErr;
-            }
-          }
-        } catch (adminEx: any) {
-          console.error('Admin insertion exception:', adminEx);
-        }
-      }
-    }
-
-    if (dbError) {
-      console.error('[P2P Ad Creation Error]:', dbError);
+    if (rpcError || !rpcResult || rpcResult.success !== true) {
+      console.error('[P2P_AD_CREATE] Atomic ad creation RPC rejected:', rpcError?.code || 'invalid_rpc_response');
+      const errorCode = rpcError?.code || 'AD_CREATE_FAILED';
+      const status = errorCode === '42501' ? 403
+        : errorCode === '22023' ? 400
+        : errorCode === '23505' ? 409
+        : 503;
       return NextResponse.json(
-        { 
-          error: dbError.message || 'Database error creating ad', 
-          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
-          code: dbError.code,
-          details: dbError.details,
-          hint: dbError.hint
-        }, 
-        { status: 400 }
+        {
+          success: false,
+          error: rpcError?.code === '42501'
+            ? 'Your account or platform settings do not permit advertisement creation.'
+            : 'Advertisement could not be created in both marketplace records. No partial listing was committed.',
+          code: errorCode,
+        },
+        { status }
       );
     }
 
-    if (data) {
-      try {
-        const admin = getSupabaseAdminClient();
-        const p2pRow = {
-          ...basePayload,
-          id: data.id || basePayload.id,
-          public_ad_id: uniqueAdId,
-          crypto: coinType,
-          fiat_currency: fiatType,
-          ad_type: adSide.toLowerCase(),
-          trade_type: adSide,
-          unit_price: priceVal,
-          status: 'ACTIVE',
-        };
-        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
-      } catch (p2pSyncErr) {
-        // Silently continue if p2p_ads is a view or non-updatable
-      }
+    const committedPrice = toFiniteNumber(rpcResult.price);
+    if (
+      typeof rpcResult.ad_id !== 'string' ||
+      !/^[A-Za-z0-9]{12}$/.test(rpcResult.ad_id) ||
+      rpcResult.public_ad_id !== uniqueAdId ||
+      typeof rpcResult.p2p_ad_id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rpcResult.p2p_ad_id) ||
+      committedPrice === null ||
+      committedPrice <= 0
+    ) {
+      console.error('[P2P_AD_CREATE] Atomic ad creation returned an invalid receipt after commit.');
+      return NextResponse.json(
+        { success: false, error: 'The ad was committed but its receipt could not be verified. Contact support before retrying.', code: 'AD_CREATE_RECEIPT_INVALID' },
+        { status: 502 }
+      );
     }
 
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: rpcResult.ad_id,
+        public_id: rpcResult.public_ad_id,
+        public_ad_id: rpcResult.public_ad_id,
+        p2p_ad_id: rpcResult.p2p_ad_id,
+        user_id: user.id,
+        type: 'BUY',
+        trade_type: 'BUY',
+        asset_symbol: coinType,
+        fiat_symbol: fiatType,
+        price: committedPrice,
+        min_limit: requestedMin,
+        max_limit: requestedMax,
+        status: 'ACTIVE',
+        active: true,
+        is_active: true,
+      },
+    });
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(

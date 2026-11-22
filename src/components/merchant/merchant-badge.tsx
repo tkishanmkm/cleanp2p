@@ -72,7 +72,7 @@ export function MerchantBadge({
               {getIcon()} {config.label}
             </p>
             <p className="text-[11px] text-slate-400">
-              Verified Security Deposit: ${config.requiredDepositUsdt.toLocaleString()} USDT locked in Paxones Escrow Reserve.
+              Verified Security Deposit: ${config.requiredDepositUsdt.toLocaleString()} USDT locked in Wayones Escrow Reserve.
             </p>
           </div>
         </TooltipContent>

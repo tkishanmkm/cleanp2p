@@ -1,10 +1,50 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { verify2FAOTP } from '@/lib/2fa';
-import { encryptUserTOTPSecret } from '@/lib/user-2fa-crypto';
-import { isTier2User } from '@/lib/kyc';
+import { ensureUserTOTPSecretEncrypted } from '@/lib/user-2fa-crypto';
 
+
+import { hashSecurityAnswer } from '@/lib/security-answer';
+import { checkUser2FARateLimit, resetUser2FAFailures, type UserTwoFactorRateLimit } from '@/lib/user-2fa-rate-limit';
+
+const SETTINGS_PROFILE_COLUMNS = 'id, username, display_name, name, full_name, email, avatar_url, photo_url, country, preferred_currency, name_visibility, dob, date_of_birth, is_country_locked, is_address_locked, address, address_street, address_city, address_postal_code, security_question, onboarding_completed, username_changed, username_changes_remaining, username_changed_count, is_verified, id_verified, kyc_status, is_kyc_locked, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, kyc_approved_at, kyc_retry_after, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, is_online, last_seen_at, created_at, updated_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, total_volume_usd, positive_feedback, negative_feedback, feedback_score, merchant_tier, merchant_applied_tier, merchant_status, merchant_deposit_usdt';
+const SUPPORTED_LANGUAGES = new Set(['en', 'ar', 'es', 'fr', 'hi', 'ko', 'pt-BR', 'ru', 'vi', 'zh-CN', 'zh-TW']);
 const RESERVED_USERNAMES = ['admin', 'support', 'help', 'system', 'official', 'security', 'p2p', 'moderator'];
+
+const MAX_SETTINGS_BODY_BYTES = 16 * 1024;
+
+async function readSettingsBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_SETTINGS_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -18,7 +58,7 @@ export async function GET() {
     const admin = getSupabaseAdminClient();
     const { data: profile, error } = await admin
       .from('profiles')
-      .select('*')
+      .select(SETTINGS_PROFILE_COLUMNS)
       .eq('id', user.id)
       .maybeSingle();
 
@@ -62,10 +102,19 @@ export async function GET() {
         auth_provider: provider,
       },
       profile: sanitizedProfile,
+    }, {
+      headers: {
+        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
+        Pragma: 'no-cache',
+        Vary: 'Cookie, Authorization',
+      },
     });
   } catch (err: any) {
-    console.error('GET /api/user/settings unexpected error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    console.error('GET /api/user/settings unexpected error:', err instanceof Error ? err.name : 'UnknownError');
+    return NextResponse.json({ error: 'Could not load account settings.' }, {
+      status: 500,
+      headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+    });
   }
 }
 
@@ -78,10 +127,26 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({}));
-    const { field, data } = body;
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_SETTINGS_BODY_BYTES) {
+      return NextResponse.json({ error: 'Settings request is too large.' }, { status: 413 });
+    }
+    const rawBody = await readSettingsBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Settings request is too large.' }, { status: 413 });
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Malformed settings request.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid settings request.' }, { status: 400 });
+    }
+    const { field, data } = body as Record<string, any>;
 
-    if (!field) {
+    if (!field || typeof field !== 'string') {
       return NextResponse.json({ error: 'Missing target setting field' }, { status: 400 });
     }
 
@@ -89,55 +154,57 @@ export async function PATCH(req: NextRequest) {
 
     switch (field) {
       case 'username': {
-        const rawUsername = data?.username?.trim().toLowerCase();
-        if (!rawUsername || !/^[a-z0-9._]{3,25}$/.test(rawUsername)) {
+        const rawValue = data?.username;
+        const rawUsername = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
+        if (!/^[a-z0-9._]{3,25}$/.test(rawUsername)) {
           return NextResponse.json({
-            error: 'Username must be 3-25 characters and contain only lowercase letters, numbers, dots, and underscores.'
+            error: 'Username must be 3-25 characters and contain only lowercase letters, numbers, dots, and underscores.',
           }, { status: 400 });
         }
-
         if (RESERVED_USERNAMES.includes(rawUsername)) {
           return NextResponse.json({ error: 'This username is reserved by the platform.' }, { status: 400 });
         }
 
-        // Fetch current user profile to enforce one-time username change
-        const { data: currentProfile } = await admin
+        const { data: currentProfile, error: currentProfileError } = await admin
           .from('profiles')
           .select('id, username, username_changed, username_changed_count, username_changes_remaining')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
-        const isLocked = Boolean(
-          currentProfile?.username_changed === true ||
-          (typeof currentProfile?.username_changed_count === 'number' && currentProfile.username_changed_count >= 1) ||
-          (typeof currentProfile?.username_changes_remaining === 'number' && currentProfile.username_changes_remaining <= 0)
-        );
+        if (currentProfileError || !currentProfile) {
+          return NextResponse.json({ error: 'Could not load username settings.' }, { status: 503 });
+        }
 
+        const isLocked = currentProfile.username_changed === true ||
+          (typeof currentProfile.username_changed_count === 'number' && currentProfile.username_changed_count >= 1) ||
+          (typeof currentProfile.username_changes_remaining === 'number' && currentProfile.username_changes_remaining <= 0);
         if (isLocked) {
           return NextResponse.json({
-            error: 'You can only change your username one time after your autogenerated username. Your handle is permanently locked.'
-          }, { status: 400 });
+            error: 'You can only change your username one time after your autogenerated username. Your handle is permanently locked.',
+          }, { status: 403 });
         }
 
-        if (currentProfile?.username && currentProfile.username.toLowerCase() === rawUsername) {
-          return NextResponse.json({
-            error: 'New username must be different from your current handle.'
-          }, { status: 400 });
+        if (typeof currentProfile.username === 'string' && currentProfile.username.toLowerCase() === rawUsername) {
+          return NextResponse.json({ error: 'New username must be different from your current handle.' }, { status: 400 });
         }
 
-        // Check if taken by another user
-        const { data: existing } = await admin
+        const { data: existing, error: existingError } = await admin
           .from('profiles')
           .select('id')
           .ilike('username', rawUsername)
           .neq('id', user.id)
+          .limit(1)
           .maybeSingle();
 
+        if (existingError) {
+          console.error('[SETTINGS] Username availability check failed', { code: existingError.code || null });
+          return NextResponse.json({ error: 'Username availability could not be verified.' }, { status: 503 });
+        }
         if (existing) {
           return NextResponse.json({ error: 'This username is already taken by another trader.' }, { status: 409 });
         }
 
-        const { error: updateErr } = await admin
+        const { data: updatedRows, error: updateErr } = await admin
           .from('profiles')
           .update({
             username: rawUsername,
@@ -147,519 +214,548 @@ export async function PATCH(req: NextRequest) {
             username_changes_remaining: 0,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select('id');
 
-        if (updateErr) throw updateErr;
-
-        // Implant new username into auth user metadata and P2P ads
-        try {
-          await admin.auth.admin.updateUserById(user.id, {
-            user_metadata: {
-              username: rawUsername,
-              display_name: rawUsername,
-            },
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          if (updateErr?.code === '23505') {
+            return NextResponse.json({ error: 'This username is already taken by another trader.' }, { status: 409 });
+          }
+          console.error('[SETTINGS] Username update failed', {
+            code: updateErr?.code || null,
+            rows: Array.isArray(updatedRows) ? updatedRows.length : null,
           });
-        } catch (authErr) {
-          console.warn('Auth metadata update warning:', authErr);
+          return NextResponse.json({ error: 'Could not save username.' }, { status: 503 });
         }
 
-        try {
-          await admin.from('p2p_ads').update({
-            user_display_name: rawUsername,
-          }).eq('user_id', user.id);
-        } catch (adsErr) {
-          console.warn('P2P ads display_name update warning:', adsErr);
+        // The profile is canonical. Metadata/ad caches are best-effort projections;
+        // inspect returned Supabase errors explicitly because they do not throw.
+        const { error: metadataError } = await admin.auth.admin.updateUserById(user.id, {
+          user_metadata: { username: rawUsername, display_name: rawUsername },
+        });
+        if (metadataError) {
+          console.warn('[SETTINGS] Username Auth metadata projection failed', { code: metadataError.code || null });
         }
 
-        return NextResponse.json({ success: true, field, updatedValue: rawUsername, message: 'Username updated successfully.' });
+        const { error: adsError } = await admin
+          .from('p2p_ads')
+          .update({ user_display_name: rawUsername })
+          .eq('user_id', user.id);
+        if (adsError) {
+          console.warn('[SETTINGS] Username ad projection failed', { code: adsError.code || null });
+        }
+
+        return NextResponse.json({
+          success: true,
+          field,
+          updatedValue: rawUsername,
+          projectionsUpdated: !metadataError && !adsError,
+          message: 'Username updated successfully.',
+        });
       }
 
       case 'avatar': {
-        const avatarUrl = data?.avatarUrl || null;
-        const { error: updateErr } = await admin
+        const rawAvatarUrl = data?.avatarUrl;
+        let avatarUrl: string | null = null;
+        if (rawAvatarUrl !== null && rawAvatarUrl !== undefined && rawAvatarUrl !== '') {
+          if (typeof rawAvatarUrl !== 'string' || rawAvatarUrl.length > 2048) {
+            return NextResponse.json({ error: 'Invalid avatar URL.' }, { status: 400 });
+          }
+          try {
+            const parsedAvatar = new URL(rawAvatarUrl);
+            if (parsedAvatar.protocol !== 'https:' || parsedAvatar.username || parsedAvatar.password) {
+              return NextResponse.json({ error: 'Avatar URLs must use secure HTTPS links.' }, { status: 400 });
+            }
+            avatarUrl = parsedAvatar.toString();
+          } catch {
+            return NextResponse.json({ error: 'Invalid avatar URL.' }, { status: 400 });
+          }
+        }
+
+        const { data: updatedRows, error: updateErr } = await admin
           .from('profiles')
           .update({
             avatar_url: avatarUrl,
             photo_url: avatarUrl,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', user.id);
-
-        if (updateErr) throw updateErr;
-
-        // Implant new avatar into auth metadata
-        try {
-          await admin.auth.admin.updateUserById(user.id, {
-            user_metadata: {
-              avatar_url: avatarUrl,
-              photo_url: avatarUrl,
-              picture: avatarUrl,
-              photoURL: avatarUrl,
-            },
-          });
-        } catch (authErr) {
-          console.warn('Auth metadata avatar update warning:', authErr);
-        }
-
-        return NextResponse.json({ success: true, field, updatedValue: avatarUrl, message: 'Profile picture updated successfully.' });
-      }
-
-      case 'personal_info': {
-        const { fullName, dob, nameVisibility } = data || {};
-
-        // Check if user has verified KYC documents
-        const { data: prof } = await admin
-          .from('profiles')
-          .select('kyc_status, full_name, dob')
           .eq('id', user.id)
-          .maybeSingle();
+          .select('id');
 
-        const isKycVerified =
-          prof?.kyc_status?.toUpperCase() === 'VERIFIED' ||
-          prof?.kyc_status?.toUpperCase() === 'APPROVED';
-
-        if (isKycVerified && (fullName !== undefined || dob !== undefined)) {
-          return NextResponse.json(
-            { error: 'Your legal name and date of birth are permanently locked once KYC verification is approved.' },
-            { status: 400 }
-          );
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          console.error('[SETTINGS] Avatar update failed', {
+            code: updateErr?.code || null,
+            rows: Array.isArray(updatedRows) ? updatedRows.length : null,
+          });
+          return NextResponse.json({ error: 'Could not save profile picture.' }, { status: 503 });
         }
 
-        const updates: any = {
-          name_visibility: nameVisibility || 'FULL',
-          updated_at: new Date().toISOString(),
-        };
-
-        // If KYC is not verified, allow updating with duplicate identity check
-        if (!isKycVerified) {
-          const targetName = (fullName !== undefined ? fullName : prof?.full_name)?.trim();
-          const targetDob = (dob !== undefined ? dob : prof?.dob)?.trim();
-
-          if (targetName && targetDob) {
-            // Check for duplicate profile
-            const { data: duplicateProfiles } = await admin
-              .from('profiles')
-              .select('id, full_name, dob, date_of_birth')
-              .neq('id', user.id);
-
-            const match = (duplicateProfiles || []).find((p: any) => {
-              const pName = (p.full_name || '').trim().toLowerCase();
-              const pDob = (p.dob || p.date_of_birth || '').trim();
-              return pName && pDob && pName === targetName.toLowerCase() && pDob === targetDob;
-            });
-
-            if (match) {
-              // Suspend user for duplicate identity violation
-              await admin
-                .from('profiles')
-                .update({
-                  status: 'suspended',
-                  is_suspended: true,
-                  suspension_reason: `Duplicate identity violation: Attempted to set legal name ("${targetName}") and DOB ("${targetDob}") matching existing user (${match.id}).`,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', user.id);
-
-              return NextResponse.json(
-                {
-                  error: 'Duplicate Identity Violation: An account with this legal name and date of birth is already registered. Your account has been suspended.',
-                  suspended: true,
-                },
-                { status: 403 }
-              );
-            }
-          }
-
-          if (fullName !== undefined) {
-            updates.full_name = fullName?.trim() || null;
-          }
-          if (dob !== undefined) {
-            if (dob) {
-              const birthDate = new Date(dob);
-              if (!isNaN(birthDate.getTime())) {
-                const today = new Date();
-                let age = today.getFullYear() - birthDate.getFullYear();
-                const m = today.getMonth() - birthDate.getMonth();
-                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-                  age--;
-                }
-                if (age < 18) {
-                  return NextResponse.json({
-                    error: 'No minors allowed: You must be at least 18 years old to trade on PaxOnes.',
-                    isMinor: true,
-                  }, { status: 400 });
-                }
-              }
-            }
-            updates.dob = dob || null;
-            updates.date_of_birth = dob || null;
-          }
+        const { error: metadataError } = await admin.auth.admin.updateUserById(user.id, {
+          user_metadata: {
+            avatar_url: avatarUrl,
+            photo_url: avatarUrl,
+            picture: avatarUrl,
+            photoURL: avatarUrl,
+          },
+        });
+        if (metadataError) {
+          console.warn('[SETTINGS] Avatar Auth metadata projection failed', { code: metadataError.code || null });
         }
-
-        const { error: updateErr } = await admin
-          .from('profiles')
-          .update(updates)
-          .eq('id', user.id);
-
-        if (updateErr) throw updateErr;
 
         return NextResponse.json({
           success: true,
           field,
-          message: isKycVerified
-            ? 'Privacy preference saved. Note: Name and DOB are locked by your verified KYC documents.'
-            : 'Personal information saved successfully.'
+          updatedValue: avatarUrl,
+          message: 'Profile picture updated successfully.',
+          metadataUpdated: !metadataError,
+        });
+      }
+
+      case 'personal_info': {
+        const { fullName, dob, nameVisibility } = data || {};
+        if (nameVisibility !== undefined && !['FULL', 'PARTIAL', 'HIDE'].includes(nameVisibility)) {
+          return NextResponse.json({ error: 'Invalid name visibility setting.' }, { status: 400 });
+        }
+        if (fullName !== undefined && (
+          typeof fullName !== 'string' ||
+          (fullName.trim().length > 0 && (
+            fullName.trim().length < 2 ||
+            fullName.trim().length > 120 ||
+            !/^[\p{L}\p{M} .'-]+$/u.test(fullName.trim())
+          ))
+        )) {
+          return NextResponse.json({ error: 'Full name must contain 2 to 120 valid characters.' }, { status: 400 });
+        }
+
+        let normalizedDob: string | null | undefined;
+        if (dob !== undefined) {
+          if (dob === '') {
+            normalizedDob = null;
+          } else if (typeof dob === 'string') {
+            const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob);
+            if (!match) {
+              return NextResponse.json({ error: 'Date of birth must use YYYY-MM-DD format.' }, { status: 400 });
+            }
+            const year = Number(match[1]);
+            const month = Number(match[2]);
+            const day = Number(match[3]);
+            const parsed = new Date(Date.UTC(year, month - 1, day));
+            if (
+              parsed.getUTCFullYear() !== year ||
+              parsed.getUTCMonth() + 1 !== month ||
+              parsed.getUTCDate() !== day
+            ) {
+              return NextResponse.json({ error: 'Date of birth is not a valid calendar date.' }, { status: 400 });
+            }
+            const today = new Date();
+            const currentYear = today.getUTCFullYear();
+            const currentMonth = today.getUTCMonth() + 1;
+            const currentDay = today.getUTCDate();
+            if (parsed.getTime() > Date.UTC(currentYear, currentMonth - 1, currentDay)) {
+              return NextResponse.json({ error: 'Date of birth cannot be in the future.' }, { status: 400 });
+            }
+            let age = currentYear - year;
+            if (currentMonth < month || (currentMonth === month && currentDay < day)) age--;
+            if (age < 18) {
+              return NextResponse.json({
+                error: 'No minors allowed: You must be at least 18 years old to trade on Wayones.',
+                isMinor: true,
+              }, { status: 400 });
+            }
+            normalizedDob = dob;
+          } else {
+            return NextResponse.json({ error: 'Invalid date of birth.' }, { status: 400 });
+          }
+        }
+
+        const { data: prof, error: profileError } = await admin
+          .from('profiles')
+          .select('kyc_status, is_verified, id_verified, is_kyc_locked, full_name, dob, date_of_birth')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profileError || !prof) {
+          return NextResponse.json({ error: 'Could not load account profile.' }, { status: 503 });
+        }
+
+        const isKycVerified = ['verified', 'approved'].includes(String(prof.kyc_status || '').toLowerCase())
+          && prof.is_verified === true
+          && prof.id_verified === true;
+
+        if ((isKycVerified || prof.is_kyc_locked === true) && (fullName !== undefined || dob !== undefined)) {
+          return NextResponse.json(
+            { error: 'Your legal name and date of birth are locked by your verified identity documents.' },
+            { status: 403 }
+          );
+        }
+
+        const updates: Record<string, unknown> = {
+          ...(nameVisibility !== undefined ? { name_visibility: nameVisibility } : {}),
+          updated_at: new Date().toISOString(),
+        };
+
+        if (!isKycVerified && prof.is_kyc_locked !== true) {
+          const targetName = fullName !== undefined ? fullName.trim() : (prof.full_name || '').trim();
+          const targetDob = normalizedDob !== undefined
+            ? normalizedDob
+            : String(prof.dob || prof.date_of_birth || '');
+
+          if (targetName && targetDob) {
+            const [duplicateDob, duplicateDateOfBirth] = await Promise.all([
+              admin.from('profiles').select('id').neq('id', user.id)
+                .eq('dob', targetDob).ilike('full_name', targetName).limit(1),
+              admin.from('profiles').select('id').neq('id', user.id)
+                .eq('date_of_birth', targetDob).ilike('full_name', targetName).limit(1),
+            ]);
+
+            if (duplicateDob.error || duplicateDateOfBirth.error) {
+              console.error('[SETTINGS] Duplicate identity lookup failed', {
+                code: duplicateDob.error?.code || duplicateDateOfBirth.error?.code || null,
+              });
+              return NextResponse.json({ error: 'Identity checks are temporarily unavailable.' }, { status: 503 });
+            }
+
+            const match = duplicateDob.data?.[0] || duplicateDateOfBirth.data?.[0];
+            if (match) {
+              const { data: suspendedRows, error: suspendError } = await admin
+                .from('profiles')
+                .update({
+                  status: 'suspended',
+                  is_suspended: true,
+                  suspension_reason: 'Duplicate identity review required. Contact support for assistance.',
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', user.id)
+                .select('id');
+
+              if (suspendError || !Array.isArray(suspendedRows) || suspendedRows.length !== 1) {
+                console.error('[SETTINGS] Duplicate identity suspension failed', { code: suspendError?.code || null });
+                return NextResponse.json({ error: 'Identity review could not be completed. Please contact support.' }, { status: 503 });
+              }
+
+              return NextResponse.json({
+                error: 'Duplicate identity detected. Your account requires manual review.',
+                suspended: true,
+              }, { status: 403 });
+            }
+          }
+
+          if (fullName !== undefined) updates.full_name = fullName.trim() || null;
+          if (normalizedDob !== undefined) {
+            updates.dob = normalizedDob;
+            updates.date_of_birth = normalizedDob;
+          }
+        }
+
+        const { data: updatedRows, error: updateErr } = await admin
+          .from('profiles')
+          .update(updates)
+          .eq('id', user.id)
+          .select('id');
+
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          console.error('[SETTINGS] Personal information update failed', {
+            code: updateErr?.code || null,
+            rows: Array.isArray(updatedRows) ? updatedRows.length : null,
+          });
+          return NextResponse.json({ error: 'Could not save personal information.' }, { status: 503 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          field,
+          message: isKycVerified || prof.is_kyc_locked === true
+            ? 'Privacy preference saved. Your verified legal name and date of birth remain locked.'
+            : 'Personal information saved successfully.',
         });
       }
 
       case 'country': {
-        const newCountry = data?.country?.trim().toUpperCase();
-        if (!newCountry || newCountry.length < 2) {
-          return NextResponse.json({ error: 'Invalid country code' }, { status: 400 });
+        const rawCountry = data?.country;
+        const newCountry = typeof rawCountry === 'string' ? rawCountry.trim().toUpperCase() : '';
+        if (!/^[A-Z]{2}$/.test(newCountry)) {
+          return NextResponse.json({ error: 'Country must be a valid two-letter ISO code.' }, { status: 400 });
         }
 
-        // Check if country is locked by verified KYC
-        const { data: prof } = await admin
+        const { data: prof, error: profileError } = await admin
           .from('profiles')
-          .select('is_country_locked, kyc_status')
+          .select('is_country_locked, kyc_status, is_verified, id_verified')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
-        if (prof?.is_country_locked || prof?.kyc_status === 'APPROVED') {
+        if (profileError || !prof) {
+          return NextResponse.json({ error: 'Could not load account country settings.' }, { status: 503 });
+        }
+
+        const isVerified = ['approved', 'verified'].includes(String(prof.kyc_status || '').toLowerCase())
+          && prof.is_verified === true
+          && prof.id_verified === true;
+        if (prof.is_country_locked === true || isVerified) {
           return NextResponse.json({
-            error: 'Your country is locked to your verified identity document. Contact support for assistance.'
+            error: 'Your country is locked to your verified identity document. Contact support for assistance.',
           }, { status: 403 });
         }
 
-        const { error: updateErr } = await admin
+        const { data: updatedRows, error: updateErr } = await admin
           .from('profiles')
-          .update({
-            country: newCountry,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
+          .update({ country: newCountry, updated_at: new Date().toISOString() })
+          .eq('id', user.id)
+          .select('id');
 
-        if (updateErr) throw updateErr;
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          console.error('[SETTINGS] Country update failed', { code: updateErr?.code || null });
+          return NextResponse.json({ error: 'Could not save country preference.' }, { status: 503 });
+        }
 
         return NextResponse.json({ success: true, field, updatedValue: newCountry, message: 'Country updated successfully.' });
       }
 
       case 'currency': {
-        const currency = data?.currency?.trim().toUpperCase() || 'USD';
-        const { error: updateErr } = await admin
-          .from('profiles')
-          .update({
-            preferred_currency: currency,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
+        const rawCurrency = data?.currency;
+        const currency = typeof rawCurrency === 'string' ? rawCurrency.trim().toUpperCase() : '';
+        if (!/^[A-Z]{3}$/.test(currency)) {
+          return NextResponse.json({ error: 'Currency must be a three-letter ISO 4217 code.' }, { status: 400 });
+        }
 
-        if (updateErr) throw updateErr;
+        const { data: updatedRows, error: updateErr } = await admin
+          .from('profiles')
+          .update({ preferred_currency: currency, updated_at: new Date().toISOString() })
+          .eq('id', user.id)
+          .select('id');
+
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          console.error('[SETTINGS] Currency update failed', { code: updateErr?.code || null });
+          return NextResponse.json({ error: 'Could not save currency preference.' }, { status: 503 });
+        }
 
         return NextResponse.json({ success: true, field, updatedValue: currency, message: 'Preferred currency updated.' });
       }
 
       case 'security_question': {
         const { question, answer, code } = data || {};
-        if (!question?.trim()) {
-          return NextResponse.json({ error: 'Question cannot be empty' }, { status: 400 });
+        if (
+          typeof question !== 'string' ||
+          question.trim().length < 5 ||
+          question.trim().length > 200
+        ) {
+          return NextResponse.json({ error: 'Security question must contain between 5 and 200 characters.' }, { status: 400 });
+        }
+        if (typeof answer !== 'string' || answer.trim().length < 2 || answer.length > 256) {
+          return NextResponse.json({ error: 'Security answer must contain between 2 and 256 characters.' }, { status: 400 });
         }
 
-        // Check if 2FA is enabled; if so, require 2FA OTP verification
-        const { data: currentProf } = await admin
+        const { data: currentProf, error: profileError } = await admin
           .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, role, is_admin, is_admin_account, admin_2fa_enabled')
           .eq('id', user.id)
           .maybeSingle();
 
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
-        const userSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
+        if (profileError || !currentProf) {
+          return NextResponse.json({ error: 'Could not load account security settings.' }, { status: 503 });
+        }
+
+        const is2faActive = Boolean(currentProf.is_2fa_enabled || currentProf.is_mfa_enabled || currentProf.two_factor_enabled);
+        let encryptedUserSecret = '';
 
         if (is2faActive) {
-          const cleanCode = code ? code.toString().trim() : '';
-          if (!cleanCode || !/^\d{4,8}$/.test(cleanCode)) {
-            return NextResponse.json({
-              error: 'Security Enforcement: 4-8 digit 2FA OTP code is required to modify security questions.',
-              requires2FA: true,
-            }, { status: 400 });
+          try {
+            encryptedUserSecret = await ensureUserTOTPSecretEncrypted(admin, user.id, currentProf);
+          } catch {
+            return NextResponse.json({ error: 'Account authenticator could not be securely encrypted and verified.' }, { status: 503 });
+          }
+          if (!encryptedUserSecret) {
+            return NextResponse.json({ error: 'Account authenticator is unavailable.' }, { status: 503 });
+          }
+          let rateLimit: UserTwoFactorRateLimit;
+          try {
+            rateLimit = await checkUser2FARateLimit(user.id);
+          } catch {
+            return NextResponse.json({ error: 'Two-factor protection is temporarily unavailable.' }, { status: 503 });
           }
 
-          if (!userSecret) {
-            return NextResponse.json({
-              error: '2FA is active but credentials cannot be verified. Please re-enroll in Settings.',
-              requires2FA: true,
-            }, { status: 403 });
+          if (!rateLimit.allowed) {
+            const { error: auditError } = await admin.from('user_security_audit_logs').insert({
+              user_id: user.id,
+              action: '2fa_rate_limited',
+              details: { endpoint: '/api/user/settings', operation: 'security_question', retryAfterSeconds: rateLimit.retryAfterSeconds },
+            });
+            if (auditError) return NextResponse.json({ error: 'Rate-limited attempt could not be securely audited.' }, { status: 503 });
+            return NextResponse.json({ error: 'Too many 2FA attempts. Please try again later.' }, {
+              status: 429,
+              headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
+            });
           }
 
-          const isValid = verify2FAOTP(userSecret, cleanCode, true);
-          if (!isValid) {
+          const cleanCode = typeof code === 'string' ? code.trim() : '';
+          if (!/^\d{6}$/.test(cleanCode) || !encryptedUserSecret || !verify2FAOTP(encryptedUserSecret, cleanCode, true)) {
+            const { error: auditError } = await admin.from('user_security_audit_logs').insert({
+              user_id: user.id,
+              action: '2fa_settings_verification_failed',
+              details: { operation: 'security_question', reason: !/^\d{6}$/.test(cleanCode) ? 'invalid_format' : 'invalid_code' },
+            });
+            if (auditError) return NextResponse.json({ error: 'Failed attempt could not be securely audited.' }, { status: 503 });
             return NextResponse.json({
-              error: 'Invalid 2FA authentication code.',
+              error: 'A valid 6-digit 2FA code is required to modify security questions.',
               requires2FA: true,
             }, { status: 401 });
           }
+
+          try {
+            await resetUser2FAFailures(user.id);
+          } catch {
+            return NextResponse.json({ error: 'Two-factor protection could not be reset.' }, { status: 503 });
+          }
         }
 
-        const updates: any = {
-          security_question: question.trim(),
-          updated_at: new Date().toISOString(),
-        };
-
-        if (answer?.trim()) {
-          // Simple hash representation or direct secure marker
-          updates.security_answer_hash = Buffer.from(answer.trim().toLowerCase()).toString('base64');
-        }
-
-        const { error: updateErr } = await admin
+        const securityAnswerHash = await hashSecurityAnswer(answer);
+        const { data: updatedRows, error: updateErr } = await admin
           .from('profiles')
-          .update(updates)
-          .eq('id', user.id);
+          .update({
+            security_question: question.trim(),
+            security_answer_hash: securityAnswerHash,
+            security_answer: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+          .select('id');
 
-        if (updateErr) throw updateErr;
+        if (updateErr || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+          console.error('[SETTINGS] Security answer update failed', {
+            code: updateErr?.code || null,
+            rows: Array.isArray(updatedRows) ? updatedRows.length : null,
+          });
+          return NextResponse.json({ error: 'Could not securely save your security question and answer.' }, { status: 503 });
+        }
 
         return NextResponse.json({ success: true, field, message: 'Security question saved successfully.' });
       }
 
       case 'two_factor': {
-        const enabled = Boolean(data?.enabled);
-        const code = data?.code?.toString().trim();
-        const secret = data?.secret?.toString().trim();
-
-        const { data: currentProf } = await admin
-          .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
-        const existingSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
-
-        if (enabled) {
-          if (!code || !/^\d{4,8}$/.test(code)) {
-            return NextResponse.json({
-              error: 'Invalid authenticator code. Please enter a valid 4-8 digit OTP code shown in your authenticator app.'
-            }, { status: 400 });
-          }
-          const validSecret = secret || existingSecret;
-          if (!validSecret) {
-            return NextResponse.json({
-              error: '2FA key missing. Please generate a new key before enabling.'
-            }, { status: 400 });
-          }
-          const isValid = verify2FAOTP(validSecret, code, true);
-          if (!isValid) {
-            return NextResponse.json({
-              error: 'Invalid authenticator code. Please check the time on your device and try again.'
-            }, { status: 400 });
-          }
-        } else {
-          // Mandatory 2FA OTP verification when disabling 2FA
-          if (is2faActive) {
-            if (!code || !/^\d{4,8}$/.test(code)) {
-              return NextResponse.json({
-                error: 'Security Enforcement: Please enter your 4-8 digit Authenticator OTP to confirm disabling 2FA.',
-                requires2FA: true,
-              }, { status: 400 });
-            }
-            if (!existingSecret) {
-              return NextResponse.json({
-                error: '2FA is active but key is missing. Contact support.',
-                requires2FA: true,
-              }, { status: 403 });
-            }
-            const isValid = verify2FAOTP(existingSecret, code, true);
-            if (!isValid) {
-              return NextResponse.json({
-                error: 'Invalid authenticator OTP code.',
-                requires2FA: true,
-              }, { status: 401 });
-            }
-          }
-        }
-
-        const updates: any = {
-          is_2fa_enabled: enabled,
-          is_mfa_enabled: enabled,
-          two_factor_enabled: enabled,
-          updated_at: new Date().toISOString(),
-        };
-
-        if (enabled && (secret || existingSecret)) {
-          const rawSec = secret || existingSecret;
-          const encSec = encryptUserTOTPSecret(rawSec);
-          updates.totp_secret = encSec;
-          updates.two_factor_secret = encSec;
-        } else if (!enabled) {
-          updates.totp_secret = null;
-          updates.two_factor_secret = null;
-        }
-
-        const { error: updateErr } = await admin
-          .from('profiles')
-          .update(updates)
-          .eq('id', user.id);
-
-        if (updateErr) throw updateErr;
-
+        // Direct client-supplied TOTP secrets and unmetered profile writes are
+        // retired. Use the pending-enrollment verification or atomic disable API.
         return NextResponse.json({
-          success: true,
-          field,
-          updatedValue: enabled,
-          message: enabled ? 'Two-Factor Authentication verified and activated.' : 'Two-Factor Authentication disabled.'
+          error: 'Direct Settings-based 2FA changes are disabled. Use the secure authenticator enrollment or disable flow.',
+        }, {
+          status: 410,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
 
       case 'preferences': {
         const { language, timezone, autoReplyMessage, notifications } = data || {};
-        const updates: any = {
-          updated_at: new Date().toISOString(),
-        };
 
-        if (language !== undefined) updates.preferred_language = language;
-        if (timezone !== undefined) updates.timezone = timezone;
-        if (autoReplyMessage !== undefined) updates.auto_reply_message = autoReplyMessage;
-        if (notifications !== undefined) updates.notifications_preferences = notifications;
-
-        try {
-          await admin
-            .from('profiles')
-            .update(updates)
-            .eq('id', user.id);
-        } catch (prefErr) {
-          console.warn('Preferences profile update error:', prefErr);
+        if (language !== undefined && (
+          typeof language !== 'string' || !SUPPORTED_LANGUAGES.has(language)
+        )) {
+          return NextResponse.json({ error: 'Unsupported application language.' }, { status: 400 });
+        }
+        if (timezone !== undefined && (
+          typeof timezone !== 'string' || timezone.length < 3 || timezone.length > 80
+        )) {
+          return NextResponse.json({ error: 'Invalid timezone preference.' }, { status: 400 });
+        }
+        if (autoReplyMessage !== undefined && (
+          typeof autoReplyMessage !== 'string' || autoReplyMessage.length > 500
+        )) {
+          return NextResponse.json({ error: 'Auto-reply message must not exceed 500 characters.' }, { status: 400 });
+        }
+        const allowedNotificationKeys = new Set([
+          'email_trade_requests',
+          'email_escrow_deposit',
+          'email_payment_sent',
+          'email_release_confirmation',
+          'chat_messages',
+          'sound_alerts',
+          'marketing_updates',
+        ]);
+        if (notifications !== undefined) {
+          if (!notifications || typeof notifications !== 'object' || Array.isArray(notifications)) {
+            return NextResponse.json({ error: 'Invalid notification preferences.' }, { status: 400 });
+          }
+          const entries = Object.entries(notifications as Record<string, unknown>);
+          if (entries.length > allowedNotificationKeys.size || entries.some(
+            ([key, value]) => !allowedNotificationKeys.has(key) || typeof value !== 'boolean'
+          )) {
+            return NextResponse.json({ error: 'Invalid notification preference values.' }, { status: 400 });
+          }
         }
 
+        // The production profiles schema does not contain timezone, auto-reply,
+        // notification-preference, or preferred-language columns. These settings
+        // are intentionally saved by the client in per-account local storage;
+        // never issue a success-shaped database write to columns that do not exist.
         return NextResponse.json({
           success: true,
           field,
-          message: 'Preferences saved successfully.'
+          storage: 'browser',
+          message: 'Preferences validated. Device preferences are saved locally.',
+        }, {
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
 
       case 'password': {
-        const { newPassword, code } = data || {};
-        if (!newPassword || newPassword.length < 8) {
-          return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 });
-        }
-
-        // 2FA check
-        const { data: currentProf } = await admin
-          .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
-        const userSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
-
-        if (is2faActive) {
-          const cleanCode = code ? code.toString().trim() : '';
-          if (!cleanCode || !/^\d{4,8}$/.test(cleanCode)) {
-            return NextResponse.json({
-              error: 'Security Enforcement: 4-8 digit 2FA OTP code is required to change your password.',
-              requires2FA: true,
-            }, { status: 400 });
-          }
-
-          if (!userSecret) {
-            return NextResponse.json({
-              error: '2FA is active but credentials cannot be verified. Please re-enroll in Settings.',
-              requires2FA: true,
-            }, { status: 403 });
-          }
-
-          const isValid = verify2FAOTP(userSecret, cleanCode, true);
-          if (!isValid) {
-            return NextResponse.json({
-              error: 'Invalid 2FA authentication code.',
-              requires2FA: true,
-            }, { status: 401 });
-          }
-        }
-
-        const { error: pwErr } = await admin.auth.admin.updateUserById(user.id, {
-          password: newPassword,
+        // Retire the legacy admin-password mutation path. Password changes must
+        // go through the authenticated Supabase Auth client so the current
+        // session/password checks and configured Auth policies remain effective.
+        return NextResponse.json({
+          error: 'Direct Settings API password changes are disabled. Use the secure account password form.',
+        }, {
+          status: 410,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
+      }
 
-        if (pwErr) {
-          return NextResponse.json({ error: pwErr.message }, { status: 400 });
-        }
-
-        // Atomically record password change timestamp for withdrawal security hold
-        await admin
+      case 'password_change_hold': {
+        // This is intentionally only a self-service security hold. It does not
+        // change the password; callers set it before asking Supabase Auth to do so.
+        const { data: heldRows, error: holdError } = await admin
           .from('profiles')
           .update({
             password_changed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select('id');
+
+        if (holdError || !Array.isArray(heldRows) || heldRows.length !== 1) {
+          console.error('[SETTINGS] Password-change security hold failed', {
+            code: holdError?.code || null,
+            rows: Array.isArray(heldRows) ? heldRows.length : null,
+          });
+          return NextResponse.json({ error: 'Could not set the required account security hold. Password was not changed.' }, { status: 503 });
+        }
 
         return NextResponse.json({
           success: true,
           field,
-          message: 'Password updated successfully. A temporary 24-hour security hold has been applied to withdrawals.',
+          message: 'Account security hold recorded.',
+        }, {
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
 
       case 'kyc_submission': {
-        const { documentType, country, street, city, postalCode } = data || {};
-        if (!documentType || !country) {
-          return NextResponse.json({ error: 'Document type and country are required.' }, { status: 400 });
-        }
-
-        // Check if country or KYC is locked
-        const { data: prof } = await admin
-          .from('profiles')
-          .select('kyc_status, is_country_locked, is_verified, id_verified')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        const isVerified = isTier2User(prof);
-
-        if (isVerified) {
-          return NextResponse.json(
-            {
-              error: 'KYC documents and address details are locked once verified. Please contact support to update verified information.'
-            },
-            { status: 403 }
-          );
-        }
-
-        // NOTE: kyc_status is strictly managed by authoritative verification pipeline (/api/didit/verify or /api/verify)
-        // Direct manipulation of kyc_status through user settings is strictly prohibited to prevent state bypass
-        const updates: any = {
-          country: country.trim().toUpperCase(),
-          updated_at: new Date().toISOString(),
-        };
-
-        if (street) updates.address_street = street.trim();
-        if (city) updates.address_city = city.trim();
-        if (postalCode) updates.address_postal_code = postalCode.trim();
-
-        const { error: updateErr } = await admin
-          .from('profiles')
-          .update(updates)
-          .eq('id', user.id);
-
-        if (updateErr) throw updateErr;
-
+        // Retire this competing KYC write path. Address/document submission,
+        // encrypted storage, session registration and verification state are
+        // handled by /api/kyc/initiate and the signed Didit webhook only.
         return NextResponse.json({
-          success: true,
-          field,
-          message: 'Identity & Address details saved. Please complete verification through the secure verification portal.'
+          error: 'Use the secure identity-verification flow to submit or update KYC information.',
+        }, {
+          status: 410,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
 
       default: {
-        return NextResponse.json({
-          success: true,
-          field,
-          message: `${field} preference updated.`
-        });
+        return NextResponse.json({ error: 'Unsupported settings field.' }, { status: 400 });
       }
     }
   } catch (err: any) {
-    console.error('PATCH /api/user/settings unexpected error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update setting' }, { status: 500 });
+    console.error('PATCH /api/user/settings unexpected error:', err instanceof Error ? err.name : 'UnknownError');
+    return NextResponse.json({ error: 'Could not update account settings.' }, {
+      status: 500,
+      headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+    });
   }
 }

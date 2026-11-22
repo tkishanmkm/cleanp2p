@@ -13,9 +13,9 @@ export async function GET(request: NextRequest) {
 
     const targetUsername = request.nextUrl.searchParams.get('username')?.replace(/^@/, '').trim();
 
-    const PUBLIC_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+    const PUBLIC_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, country_code, is_verified, is_online, is_trading_eligible, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, total_volume_usd, total_traded_usd, positive_feedback, negative_feedback, feedback_score, merchant_tier';
 
-    const OWNER_COLUMNS = 'id, username, display_name, name, full_name, email, avatar_url, photo_url, country, preferred_currency, name_visibility, dob, date_of_birth, is_country_locked, security_question, onboarding_completed, username_changed, username_changes_remaining, username_changed_count, is_verified, id_verified, kyc_status, is_kyc_locked, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, kyc_approved_at, kyc_retry_after, is_2fa_enabled, is_mfa_enabled, is_online, last_seen_at, created_at, updated_at, deposit_address, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+    const OWNER_COLUMNS = 'id, username, display_name, name, full_name, email, avatar_url, photo_url, country, preferred_currency, name_visibility, dob, date_of_birth, is_country_locked, security_question, onboarding_completed, username_changed, username_changes_remaining, username_changed_count, is_verified, id_verified, kyc_status, is_kyc_locked, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, kyc_approved_at, kyc_retry_after, is_2fa_enabled, is_mfa_enabled, is_online, last_seen_at, created_at, updated_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, total_volume_usd, total_traded_usd, positive_feedback, negative_feedback, feedback_score';
 
     let profile: any = null;
     let isOwner = false;
@@ -41,10 +41,10 @@ export async function GET(request: NextRequest) {
     } else {
       // Mode 2: Querying another user by username -> Public Mode (26 public columns ONLY)
       const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(targetUsername);
-      let query = admin.from('profiles').select(PUBLIC_COLUMNS);
+      let query = admin.from('public_profiles').select(PUBLIC_COLUMNS);
 
       if (isUuid) {
-        query = query.or(`id.eq.${targetUsername},username.ilike.${targetUsername}`);
+        query = query.eq('id', targetUsername);
       } else {
         query = query.ilike('username', targetUsername);
       }
@@ -74,30 +74,20 @@ export async function GET(request: NextRequest) {
 
     // Calculate dynamic trades & fiat trade volume
     let completedTradeCount = profile.completed_trades || profile.total_completed_trades || 0;
-    let totalTradeVolumeFiat = profile.trade_volume || profile.total_trade_volume || 0;
+    let totalTradeVolumeFiat = profile.trade_volume || profile.total_volume_usd || profile.total_traded_usd || 0;
 
     let avgPayTimeSeconds: number | null = profile.avg_pay_time_seconds ?? null;
     let avgReleaseTimeSeconds: number | null = profile.avg_release_time_seconds ?? null;
 
-    try {
-      const { data: allUserTrades } = await admin
-        .from('trades')
-        .select('id, buyer_id, seller_id, created_at, paid_at, marked_paid_at, released_at, completed_at, fiat_amount, fiat_amount_usd, status')
-        .or(`buyer_id.eq.${profile.id},seller_id.eq.${profile.id}`);
+    // Use the profile's maintained aggregate counters instead of scanning every
+    // historical trade on each profile request. An unbounded scan can exhaust
+    // the free-tier database budget and return incomplete totals under row caps.
+    // Financial aggregates should be maintained atomically by trade lifecycle RPCs.
+    completedTradeCount = Number(completedTradeCount) || 0;
+    totalTradeVolumeFiat = Number(totalTradeVolumeFiat) || 0;
 
-      if (allUserTrades && allUserTrades.length > 0) {
-        const completedList = allUserTrades.filter(t => t.status === 'completed' || t.status === 'released');
-        completedTradeCount = completedList.length;
-        totalTradeVolumeFiat = completedList.reduce((acc, t) => {
-          const val = Number(t.fiat_amount || t.fiat_amount_usd || 0);
-          return acc + (isNaN(val) ? 0 : val);
-        }, 0);
-      }
-    } catch {
-      // ignore dynamic calculation error
-    }
-
-    const isIdVerified = isTier2User(profile);
+    // Public responses expose only the public verification badge, never internal KYC workflow status.
+    const isIdVerified = isOwner ? isTier2User(profile) : profile.is_verified === true;
 
     return NextResponse.json({
       profile: {

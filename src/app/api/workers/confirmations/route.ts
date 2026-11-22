@@ -12,7 +12,6 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.DEPOSIT_WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
-    checkQueryParam: true,
   });
 
   return result.authorized;

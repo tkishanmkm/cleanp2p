@@ -48,7 +48,7 @@ export default function BannedUserDashboard() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, email, ban_reason, suspension_reason, status, is_banned, is_suspended, is_on_hold, account_status, banned_at, created_at')
         .eq('id', user.id)
         .maybeSingle();
       
@@ -57,7 +57,7 @@ export default function BannedUserDashboard() {
       // Fetch wallets with positive balance (> 0)
       const { data: wData } = await supabase
         .from('wallets')
-        .select('*')
+        .select('currency, balance')
         .eq('user_id', user.id);
 
       const positiveWallets = (wData || []).filter(
@@ -255,7 +255,7 @@ export default function BannedUserDashboard() {
         {/* Top Header Bar */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="flex items-center gap-2">
-            <span className="font-black text-xl tracking-tight text-white">PAXONES</span>
+            <span className="font-black text-xl tracking-tight text-white">Wayones</span>
             <span className="text-xs px-2 py-0.5 rounded bg-rose-950 text-rose-400 font-semibold border border-rose-800/60">
               Account Restricted
             </span>
@@ -281,7 +281,7 @@ export default function BannedUserDashboard() {
                 You are Banned
               </h1>
               <p className="text-xs sm:text-sm text-rose-300 font-medium">
-                Your Paxones account access has been permanently terminated.
+                Your Wayones account access has been permanently terminated.
               </p>
             </div>
           </div>
@@ -302,7 +302,7 @@ export default function BannedUserDashboard() {
               <span className="font-bold block text-rose-100 uppercase tracking-wide">
                 No Appeal Entertained
               </span>
-              This suspension is definitive and permanent under Paxones platform security and regulatory compliance policies. Appeals, tickets, or reinstatement requests will not be entertained.
+              This suspension is definitive and permanent under Wayones platform security and regulatory compliance policies. Appeals, tickets, or reinstatement requests will not be entertained.
             </div>
           </div>
         </div>

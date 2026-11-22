@@ -115,15 +115,13 @@ test.describe('Security & Chaos Penetration Suite', () => {
     // Endpoint must process cleanly without crediting the fake asset
     expect(webhookRes.status()).toBe(200);
 
-    // Verify through deposit status / balance endpoint that 50,000 USDT was never credited
-    const balanceRes = await request.get(`${BASE_URL}/api/wallet/balances`, {
-      headers: { 'x-test-address': testRecipient },
-    }).catch(() => null);
-
-    if (balanceRes && balanceRes.ok()) {
-      const balanceData = await balanceRes.json();
-      expect(Number(balanceData.available || 0)).toBeLessThan(50000);
-    }
+    // Private wallet aggregates must not be readable by an unauthenticated caller.
+    // The deposit webhook registers pending candidates only; the authenticated
+    // confirmation worker is the only path that can perform a canonical credit.
+    const balanceRes = await request.get(
+      `${BASE_URL}/api/wallet/balances?address=${encodeURIComponent(testRecipient)}`
+    );
+    expect(balanceRes.status()).toBe(401);
   });
 
   // ==========================================================================

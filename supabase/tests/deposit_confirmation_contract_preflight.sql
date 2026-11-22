@@ -1,0 +1,224 @@
+-- Read-only post-apply verification for the canonical deposit registration/confirmation lease contract.
+DO $check$
+DECLARE
+    v_register regprocedure :=
+      to_regprocedure('public.register_pending_deposit(text,text,text,numeric,text,integer,bigint,text,text,integer,text)');
+    v_claim regprocedure :=
+      to_regprocedure('public.claim_pending_deposit_confirmations(text,integer,integer)');
+    v_release regprocedure :=
+      to_regprocedure('public.release_pending_deposit_confirmation_claim(uuid,text)');
+    v_confirm regprocedure :=
+      to_regprocedure('public.process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text,text)');
+    v_credit regprocedure :=
+      to_regprocedure('public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)');
+    v_register_def text;
+    v_claim_def text;
+    v_release_def text;
+    v_confirm_def text;
+    v_credit_def text;
+BEGIN
+    IF to_regclass('public.onchain_deposits') IS NULL
+       OR v_register IS NULL
+       OR v_claim IS NULL
+       OR v_release IS NULL
+       OR v_confirm IS NULL
+       OR v_credit IS NULL THEN
+        RAISE EXCEPTION 'FAIL: canonical deposit confirmation tables or RPC signatures are missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'confirmation_worker_id'
+          AND data_type = 'text'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'confirmation_lease_expires_at'
+          AND data_type = 'timestamp with time zone'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'block_number'
+          AND data_type = 'bigint'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'block_hash'
+          AND data_type = 'text'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'deposits'
+          AND column_name = 'block_hash'
+          AND data_type = 'text'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: deposit confirmation lease or canonical block identity columns are missing or have incorrect types';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.onchain_deposits'::regclass
+          AND conname = 'onchain_deposit_confirmation_lease_state_check'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: confirmation lease owner/expiry consistency constraint is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.onchain_deposits'::regclass
+          AND conname = 'onchain_deposit_block_identity_check'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.deposits'::regclass
+          AND conname = 'deposits_block_hash_format_check'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: chain-specific block identity format constraints are missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'onchain_deposits'
+          AND indexname = 'idx_onchain_deposits_confirmation_claim'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'onchain_deposits'
+          AND indexname = 'idx_onchain_deposits_confirmed_block_identity'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: pending confirmation or confirmed block-identity index is missing';
+    END IF;
+
+    IF to_regprocedure('public.claim_pending_deposit_confirmations(uuid,integer,integer)') IS NOT NULL
+       OR to_regprocedure('public.release_pending_deposit_confirmation_claim(uuid,uuid)') IS NOT NULL
+       OR to_regprocedure('public.process_deposit_atomic_with_lease(uuid,uuid,text,text,text,numeric,text,integer,bigint,text,text,integer,text)') IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: conflicting UUID-based confirmation lease RPC overloads are installed';
+    END IF;
+
+    SELECT pg_get_functiondef(v_register) INTO v_register_def;
+    SELECT pg_get_functiondef(v_claim) INTO v_claim_def;
+    SELECT pg_get_functiondef(v_release) INTO v_release_def;
+    SELECT pg_get_functiondef(v_confirm) INTO v_confirm_def;
+    SELECT pg_get_functiondef(v_credit) INTO v_credit_def;
+
+    IF position('p_confirmations IS DISTINCT FROM 0' IN v_register_def) = 0
+       OR position('public.process_deposit_atomic' IN v_register_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: pending registration must accept only zero-confirmation candidates and delegate to the canonical RPC';
+    END IF;
+
+    IF position('v_effective_confirmations := COALESCE(p_confirmations, 0)' IN v_credit_def) = 0
+       OR position('v_effective_confirmations >= v_required_confirmations' IN v_credit_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: canonical credit must base its confirmation decision on the submitted verification count and the network threshold';
+    END IF;
+
+    -- Keep the pending-registration count (zero) strictly below every
+    -- supported network's positive canonical credit threshold.
+    IF position('WHEN ''BTC'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 3;' IN substring(v_credit_def FROM position('WHEN ''BTC'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''LTC'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 6;' IN substring(v_credit_def FROM position('WHEN ''LTC'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''ETH'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 12;' IN substring(v_credit_def FROM position('WHEN ''ETH'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''ERC20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 12;' IN substring(v_credit_def FROM position('WHEN ''ERC20'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''BEP20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 15;' IN substring(v_credit_def FROM position('WHEN ''BEP20'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''TRC20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 19;' IN substring(v_credit_def FROM position('WHEN ''TRC20'' THEN' IN v_credit_def) FOR 700)) = 0 THEN
+        RAISE EXCEPTION 'FAIL: canonical deposit credit no longer enforces positive per-network confirmation floors (BTC 3, LTC 6, ETH/ERC20 12, BEP20 15, TRC20 19)';
+    END IF;
+
+    IF position('WALLET_ASSET_BALANCE_INVALID' IN v_credit_def) = 0
+       OR position('v_previous_balance::TEXT IN (''NaN'', ''Infinity'', ''-Infinity'')' IN v_credit_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: canonical deposit credit must fail closed on NULL, negative or non-finite wallet balances';
+    END IF;
+
+    IF position('FOR UPDATE SKIP LOCKED' IN v_claim_def) = 0
+       OR position('confirmation_worker_id = p_owner_token' IN v_claim_def) = 0
+       OR position('confirmation_lease_expires_at' IN v_claim_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: deposit claiming is missing row-lock, owner-token or lease-expiry fencing';
+    END IF;
+
+    IF position('confirmation_worker_id = p_owner_token' IN v_release_def) = 0
+       OR position('confirmation_worker_id = NULL' IN v_release_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: claim release is not bound to the original worker token';
+    END IF;
+
+    IF position('v_deposit.confirmation_worker_id IS DISTINCT FROM p_lease_token' IN v_confirm_def) = 0
+       OR position('v_deposit.confirmation_lease_expires_at <= pg_catalog.clock_timestamp()' IN v_confirm_def) = 0
+       OR position('v_deposit.amount IS DISTINCT FROM p_amount' IN v_confirm_def) = 0
+       OR position('v_deposit.output_index IS DISTINCT FROM p_output_index' IN v_confirm_def) = 0
+       OR position('p_block_hash' IN v_confirm_def) = 0
+       OR position('block_hash = COALESCE(block_hash, p_block_hash)' IN v_confirm_def) = 0
+       OR position('metadata = COALESCE(metadata' IN v_confirm_def) = 0
+       OR position('public.process_deposit_atomic' IN v_confirm_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: leased credit wrapper is missing lease, exact identity or atomic block-hash ledger persistence';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_register
+          AND prosecdef IS TRUE
+          AND proconfig @> ARRAY['search_path=""']::text[]
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_claim
+          AND prosecdef IS TRUE
+          AND proconfig @> ARRAY['search_path=""']::text[]
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_release
+          AND prosecdef IS TRUE
+          AND proconfig @> ARRAY['search_path=""']::text[]
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_confirm
+          AND prosecdef IS TRUE
+          AND proconfig @> ARRAY['search_path=""']::text[]
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_credit
+          AND prosecdef IS TRUE
+          AND proconfig @> ARRAY['search_path=pg_catalog']::text[]
+    ) THEN
+        RAISE EXCEPTION 'FAIL: deposit SECURITY DEFINER RPC search_path settings are not hardened';
+    END IF;
+
+    IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc p
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+                coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))
+            ) acl
+            WHERE p.oid IN (v_register, v_claim, v_release, v_confirm, v_credit)
+              AND acl.grantee = 0
+              AND acl.privilege_type = 'EXECUTE'
+       )
+       OR has_function_privilege('anon', v_register, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_register, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', v_register, 'EXECUTE')
+       OR has_function_privilege('anon', v_claim, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_claim, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', v_claim, 'EXECUTE')
+       OR has_function_privilege('anon', v_release, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_release, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', v_release, 'EXECUTE')
+       OR has_function_privilege('anon', v_confirm, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_confirm, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', v_confirm, 'EXECUTE')
+       OR has_function_privilege('anon', v_credit, 'EXECUTE')
+       OR has_function_privilege('authenticated', v_credit, 'EXECUTE')
+       OR has_function_privilege('service_role', v_credit, 'EXECUTE')
+       OR NOT has_function_privilege('postgres', v_credit, 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL: deposit RPC execution grants do not match the server-only contract';
+    END IF;
+
+    RAISE NOTICE 'PASS: pending registration is zero-confirmation only; claim, lease, identity and server-only credit boundaries are present';
+END;
+$check$;

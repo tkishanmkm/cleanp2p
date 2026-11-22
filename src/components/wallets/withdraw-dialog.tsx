@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -19,15 +19,21 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { getCachedGasFees, type NetworkGasFee } from '@/lib/gas-oracle';
 import { supabase } from '@/lib/supabase/client';
 import { isTier2User } from '@/lib/kyc';
+import { useI18n } from '@/context/i18n-context';
 
-const withdrawSchema = z.object({
-  address: z.string().min(1, "Recipient address is required."),
-  amount: z.coerce.number().positive("Amount must be a positive number."),
-  chain: z.string().min(1, "Please select a network."),
+const createWithdrawSchema = (t: (key: string) => string) => z.object({
+  address: z.string().min(1, t('withdrawDialog.schemaAddressRequired')),
+  amount: z.coerce.number().positive(t('withdrawDialog.schemaAmountPositive')),
+  chain: z.string().min(1, t('withdrawDialog.schemaNetworkRequired')),
   totpCode: z.string().optional(),
 });
 
-type WithdrawFormValues = z.infer<typeof withdrawSchema>;
+type WithdrawFormValues = z.infer<ReturnType<typeof createWithdrawSchema>>;
+
+// The deployed custody withdrawal RPC currently supports only USDT on these networks.
+// Do not expose an asset/network combination until its complete payout and settlement
+// path has been deployed and verified against the live schema.
+const ENABLED_WITHDRAWAL_NETWORKS: Record<string, string[]> = {};
 
 interface WithdrawDialogProps {
   open: boolean;
@@ -37,10 +43,14 @@ interface WithdrawDialogProps {
 }
 
 export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: WithdrawDialogProps) {
+  const { t } = useI18n();
+  const withdrawSchema = useMemo(() => createWithdrawSchema(t), [t]);
   const { user, profile } = useAuth();
   const { toast } = useToast();
   const { requestWithdrawal, refreshBalances, balances } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
+  // Reuse the key if the same internal transfer is retried after a timeout.
+  const internalTransferAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const [isGasLoading, setIsGasLoading] = useState(false);
   const [gasFeeData, setGasFeeData] = useState<NetworkGasFee | null>(null);
   const [is2faEnabledState, setIs2faEnabledState] = useState(false);
@@ -87,8 +97,11 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
   const availableChains = useMemo(() => {
     if (!asset) return [];
-    return SUPPORTED_CRYPTOS.find(c => c.name === asset)?.chains || [];
+    const configuredChains = SUPPORTED_CRYPTOS.find(c => c.name === asset)?.chains || [];
+    const enabledChains = ENABLED_WITHDRAWAL_NETWORKS[asset] || [];
+    return configuredChains.filter((chain) => enabledChains.includes(chain));
   }, [asset]);
+  const withdrawalAssetUnavailable = Boolean(asset && availableChains.length === 0);
 
   const form = useForm<WithdrawFormValues>({
     resolver: zodResolver(withdrawSchema),
@@ -207,6 +220,14 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
   async function onSubmit(values: WithdrawFormValues) {
     if (!user || !asset) return;
+    if (withdrawalAssetUnavailable || !availableChains.includes(values.chain)) {
+      toast({
+        variant: 'destructive',
+        title: t('withdrawDialog.withdrawalFailed'),
+        description: t('withdrawDialog.withdrawalAssetUnavailable'),
+      });
+      return;
+    }
 
     const targetAddress = values.address.trim();
     const withdrawAmt = Number(values.amount);
@@ -216,25 +237,54 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       // If 2FA is active, validate that TOTP code is provided
       if (is2faActive) {
         const cleanTotp = (values.totpCode || '').trim();
-        if (!cleanTotp || cleanTotp.length < 4 || cleanTotp.length > 8) {
+        if (!/^\d{6}$/.test(cleanTotp)) {
           form.setError('totpCode', {
-            message: 'Please enter your 4-8 digit authenticator OTP code.',
+            message: t('withdrawDialog.invalidOtp'),
           });
           setIsLoading(false);
           return;
         }
       }
 
-      // Check if the destination address belongs to another registered user on the platform
-      const { data: internalDep } = await supabase
-        .from('deposit_addresses')
-        .select('user_id')
-        .eq('address', targetAddress)
-        .maybeSingle();
+      // Resolve internal recipients through the authenticated server endpoint.
+      // Client-side RLS only exposes the signed-in user's own address rows.
+      const internalRecipientResponse = await fetch('/api/wallet/resolve-deposit-recipient', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: targetAddress }),
+      });
 
-      if (internalDep?.user_id && internalDep.user_id !== user.uid) {
+      let internalRecipientId: string | null = null;
+      if (internalRecipientResponse.status === 404) {
+        internalRecipientId = null;
+      } else if (internalRecipientResponse.ok) {
+        const internalRecipientPayload = await internalRecipientResponse.json();
+        const candidateId = internalRecipientPayload?.recipient?.id;
+        if (typeof candidateId !== 'string' || !candidateId) {
+          throw new Error('Internal recipient ownership could not be verified.');
+        }
+        internalRecipientId = candidateId;
+      } else {
+        // Never continue to an on-chain withdrawal when internal ownership
+        // lookup failed or reported ambiguous registry ownership.
+        const lookupPayload = await internalRecipientResponse.json().catch(() => null);
+        throw new Error(
+          lookupPayload?.error || 'Destination ownership could not be verified. Please retry.'
+        );
+      }
+
+      if (internalRecipientId && internalRecipientId !== (user.uid || user.id)) {
         // Internal transfer detected! Execute instantly via internal transfer API
-        const internalTransferKey = globalThis.crypto.randomUUID();
+        const transferFingerprint = JSON.stringify([targetAddress, asset, withdrawAmt]);
+        const previousAttempt = internalTransferAttemptRef.current;
+        const internalTransferKey =
+          previousAttempt?.fingerprint === transferFingerprint
+            ? previousAttempt.key
+            : globalThis.crypto.randomUUID();
+        internalTransferAttemptRef.current = {
+          fingerprint: transferFingerprint,
+          key: internalTransferKey,
+        };
         const transferRes = await fetch('/api/wallet/transfer', {
           method: 'POST',
           headers: {
@@ -252,18 +302,20 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
         const transferData = await transferRes.json();
         if (!transferRes.ok || transferData.error) {
-          throw new Error(transferData.error || 'Failed to complete internal transfer');
+          throw new Error(transferData.error || t('withdrawDialog.failedToProcessWithdrawal'));
         }
+        // Clear only after the server confirms success; keep the key after timeouts/errors.
+        internalTransferAttemptRef.current = null;
 
         if (transferData.idempotentReplay || transferData.idempotent_replay) {
           toast({
-            title: 'Internal Transfer Already Completed',
-            description: `This transfer was previously completed (ID: ${transferData.transferId}).`,
+            title: t('withdrawDialog.internalTransferAlreadyCompleted'),
+            description: t('withdrawDialog.internalTransferPreviouslyCompleted').replace('{id}', String(transferData.transferId)),
           });
         } else {
           toast({
-            title: 'Internal Transfer Completed!',
-            description: `Address belongs to @${transferData.recipientUsername}. Processed instantly as an internal transfer (1.5% Fee: ${transferData.fee} ${asset}).`,
+            title: t('withdrawDialog.internalTransferCompleted'),
+            description: t('withdrawDialog.internalTransferDescription').replace('{username}', String(transferData.recipientUsername)).replace('{fee}', String(transferData.fee)).replace('{asset}', String(asset)),
           });
         }
 
@@ -272,12 +324,27 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
         return;
       }
 
+      // Standard on-chain withdrawals require at least $5 USD equivalent. Internal transfers above are handled separately.
+      const liveAssetPrice = Number(prices[asset] || (asset === 'USDT' ? 1 : 0));
+      if (!Number.isFinite(liveAssetPrice) || liveAssetPrice <= 0 || withdrawAmt * liveAssetPrice < 5) {
+        toast({
+          title: t('withdrawDialog.minimumWithdrawalNotMet'),
+          description: liveAssetPrice > 0
+            ? t('withdrawDialog.minimumOnchainWithdrawal')
+            : t('withdrawDialog.liveUsdUnavailable'),
+          variant: 'destructive',
+        });
+        setIsLoading(false);
+        return;
+      }
+
       // Standard On-chain withdrawal
       const totalRequired = withdrawAmt + Number(feeInCrypto || 0);
       if (totalRequired > availableBalance) {
         form.setError("amount", {
-          message: `Insufficient balance to cover withdrawal (${withdrawAmt} ${asset}) + network gas fee (${feeInCrypto.toFixed(6)} ${asset}).`,
+          message: t('withdrawDialog.insufficientBalance').replace('{deducted}', (withdrawAmt + feeInCrypto).toFixed(6)).replace('{available}', availableBalance.toFixed(6)).replace('{asset}', String(asset)),
         });
+        setIsLoading(false);
         return;
       }
 
@@ -291,13 +358,13 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       );
 
       toast({
-        title: "Withdrawal Requested",
-        description: `Your withdrawal of ${withdrawAmt} ${asset} has been submitted for processing.`,
+        title: t('withdrawDialog.withdrawalRequested'),
+        description: t('withdrawDialog.withdrawalRequestedDescription').replace('{amount}', String(withdrawAmt)).replace('{asset}', String(asset)),
       });
       await refreshBalances();
       onOpenChange(false);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to process withdrawal.";
+      const message = error instanceof Error ? error.message : t('withdrawDialog.failedToProcessWithdrawal');
       if (
         message.toLowerCase().includes('totp') ||
         message.toLowerCase().includes('2fa') ||
@@ -308,7 +375,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       }
       toast({
         variant: 'destructive',
-        title: "Withdrawal Failed",
+        title: t('withdrawDialog.withdrawalFailed'),
         description: message,
       });
     } finally {
@@ -320,8 +387,14 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="text-xl font-bold">Withdraw {asset}</DialogTitle>
+          <DialogTitle className="text-xl font-bold">{t('withdrawDialog.title').replace('{asset}', String(asset || ''))}</DialogTitle>
         </DialogHeader>
+        {withdrawalAssetUnavailable && (
+          <div role="status" className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{t('withdrawDialog.withdrawalAssetUnavailable')}</span>
+          </div>
+        )}
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
             <FormField
@@ -329,11 +402,11 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               name="chain"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Network</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value || ''}>
+                  <FormLabel>{t('withdrawDialog.network')}</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value || ''} disabled={withdrawalAssetUnavailable}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select network" />
+                        <SelectValue placeholder={t('withdrawDialog.selectNetworkPlaceholder')} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
@@ -354,10 +427,11 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               name="address"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Destination Address</FormLabel>
+                  <FormLabel>{t('withdrawDialog.destinationAddress')}</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder={`Enter ${watchedChain || asset || ''} address`}
+                      disabled={withdrawalAssetUnavailable}
+                      placeholder={t('withdrawDialog.enterAddressPlaceholder').replace('{network}', String(watchedChain || asset || ''))}
                       {...field}
                       value={field.value || ''}
                     />
@@ -372,13 +446,14 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Amount</FormLabel>
+                  <FormLabel>{t('common.amount')}</FormLabel>
                   <div className="relative">
                     <FormControl>
                       <Input
+                        disabled={withdrawalAssetUnavailable}
                         type="number"
                         step="any"
-                        placeholder="0.00"
+                        placeholder={t('withdrawDialog.amountPlaceholder')}
                         {...field}
                         value={field.value === undefined ? '' : field.value}
                         onChange={(e) => field.onChange(e.target.value)}
@@ -386,18 +461,19 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                     </FormControl>
                     <Button
                       type="button"
+                      disabled={withdrawalAssetUnavailable}
                       variant="ghost"
                       size="sm"
                       className="absolute right-1 top-1/2 -translate-y-1/2 text-xs font-semibold text-primary hover:text-primary/80"
                       onClick={handleSetMaxAmount}
                     >
-                      Max
+                      {t('withdrawDialog.max')}
                     </Button>
                   </div>
                   <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-                    <span>Available: {Number(availableBalance || 0) === 0 ? '0' : Number(availableBalance || 0).toFixed(8)} {asset}</span>
-                    {prices[asset || ''] ? (
-                      <span>≈ ${(Number(availableBalance || 0) * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
+                    <span>{t('withdrawDialog.available')}: {Number(availableBalance || 0) === 0 ? '0' : Number(availableBalance || 0).toFixed(8)} {asset}</span>
+                    {asset && prices[asset] ? (
+                      <span>≈ ${(Number(availableBalance || 0) * (prices[asset] || 0)).toFixed(2)} USD</span>
                     ) : null}
                   </div>
                   <FormMessage />
@@ -410,7 +486,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               <div className="flex justify-between items-center text-muted-foreground">
                 <span className="flex items-center gap-1.5 font-medium">
                   <Fuel className="h-3.5 w-3.5 text-primary" />
-                  Estimated Network Gas Fee:
+                  {t('withdrawDialog.estimatedNetworkGasFee')}:
                 </span>
                 <span className="font-mono flex items-center gap-1">
                   {isGasLoading ? (
@@ -428,27 +504,27 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
               {gasFeeData?.sat_per_vbyte && (
                 <div className="flex justify-between text-[11px] text-muted-foreground/80 pl-5">
-                  <span>Mempool Rate:</span>
+                  <span>{t('withdrawDialog.mempoolRate')}:</span>
                   <span>{gasFeeData.sat_per_vbyte} sat/vB</span>
                 </div>
               )}
 
               {gasFeeData?.base_fee_gwei && (
                 <div className="flex justify-between text-[11px] text-muted-foreground/80 pl-5">
-                  <span>EVM Gas Price:</span>
+                  <span>{t('withdrawDialog.evmGasPrice')}:</span>
                   <span>{(Number(gasFeeData.base_fee_gwei) + Number(gasFeeData.priority_fee_gwei || 0)).toFixed(1)} Gwei</span>
                 </div>
               )}
 
               <div className="border-t border-border/40 pt-2 flex justify-between items-center font-medium">
-                <span>Total Balance Deducted:</span>
+                <span>{t('withdrawDialog.totalBalanceDeducted')}:</span>
                 <span className="font-mono text-foreground font-semibold">
                   {totalDeducted > 0 ? Number(totalDeducted).toFixed(6) : '0.00'} {asset}
                 </span>
               </div>
 
               <div className="flex justify-between items-center text-muted-foreground">
-                <span>You Will Receive:</span>
+                <span>{t('withdrawDialog.youWillReceive')}:</span>
                 <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                   {Math.max(0, numericWatchedAmount).toFixed(6)} {asset}
                 </span>
@@ -459,7 +535,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               <div className="flex items-start gap-2 p-2.5 bg-destructive/10 border border-destructive/20 text-destructive rounded-md text-xs">
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Insufficient balance. Total deduction ({Number(totalDeducted).toFixed(6)} {asset}) exceeds available balance ({Number(availableBalance).toFixed(6)} {asset}).
+                  {t('withdrawDialog.insufficientBalance').replace('{deducted}', Number(totalDeducted).toFixed(6)).replace('{available}', Number(availableBalance).toFixed(6)).replace('{asset}', String(asset))}
                 </span>
               </div>
             )}
@@ -472,7 +548,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                   <FormItem className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-1.5">
                     <FormLabel className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
                       <ShieldCheck className="h-4 w-4" />
-                      Two-Factor Authentication (2FA)
+                      {t('withdrawDialog.twoFactorAuth')}
                     </FormLabel>
                     <FormControl>
                       <Input
@@ -480,11 +556,12 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                         type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
-                        maxLength={8}
-                        placeholder="Enter 4-8 digit authenticator code"
+                        maxLength={6}
+                        placeholder={t('withdrawDialog.otpPlaceholder')}
                         className="font-mono text-center tracking-widest bg-background"
                         {...field}
                         value={field.value || ''}
+                        onChange={(e) => field.onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       />
                     </FormControl>
                     <FormMessage className="text-[11px]" />
@@ -497,10 +574,10 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               <div className="flex flex-col gap-1.5 p-3 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 rounded-md text-xs font-semibold">
                 <div className="flex items-center gap-1.5">
                   <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>KYC verification is required to withdraw funds.</span>
+                  <span>{t('withdrawDialog.kycRequired')}</span>
                 </div>
                 <a href="/settings" className="text-blue-600 dark:text-blue-400 underline text-xs">
-                  Complete Identity Verification (Tier 2) in Settings &rarr;
+                  {t('withdrawDialog.completeKycTier2')}
                 </a>
               </div>
             )}
@@ -509,18 +586,19 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               id="confirm-withdrawal-button"
               type="submit"
               disabled={
+                withdrawalAssetUnavailable ||
                 isLoading ||
                 !isTier2 ||
                 isInsufficientBalance ||
                 !numericWatchedAmount ||
                 numericWatchedAmount <= 0 ||
                 !watchedChain ||
-                (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
+                (is2faActive && !/^\d{6}$/.test(form.watch('totpCode') || ''))
               }
               className="w-full"
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Confirm Withdrawal
+              {t('withdrawDialog.confirmWithdrawal')}
             </Button>
           </form>
         </Form>

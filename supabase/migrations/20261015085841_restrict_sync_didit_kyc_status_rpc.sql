@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.sync_didit_kyc_status(uuid, text, text, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sync_didit_kyc_status(uuid, text, text, jsonb) TO service_role;

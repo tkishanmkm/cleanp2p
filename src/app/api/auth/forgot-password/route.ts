@@ -1,120 +1,200 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { hashSecurityAnswer, verifySecurityAnswer } from '@/lib/security-answer';
+import { getURL } from '@/lib/utils';
+
+export const dynamic = 'force-dynamic';
+
+const MAX_RECOVERY_BODY_BYTES = 8 * 1024;
+const GENERIC_RESPONSE = {
+  success: true,
+  email: '',
+  message: 'If the provided details match our records, a password reset link will be sent to the verified account email.',
+};
+
+async function readBoundedBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_RECOVERY_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function getTrustedRecoveryOrigin(): string {
+  const parsed = new URL(getURL());
+  const isLocalDevelopment = process.env.NODE_ENV === 'development'
+    && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+  if (parsed.protocol !== 'https:' && !isLocalDevelopment) {
+    throw new Error('Password recovery redirect origin must use HTTPS.');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Password recovery redirect origin is invalid.');
+  }
+  return parsed.origin;
+}
 
 export async function POST(req: Request) {
   try {
-    const { identifier, securityQuestion, securityAnswer, captchaToken } = await req.json();
-
-    if (!captchaToken) {
-      return NextResponse.json(
-        { error: 'Please complete the hCaptcha verification before continuing.' },
-        { status: 400 }
-      );
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_RECOVERY_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
     }
 
-    // Optional server-side hCaptcha secret key validation if configured
-    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
-    if (hcaptchaSecret) {
-      try {
-        const verifyRes = await fetch('https://hcaptcha.com/siteverify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            secret: hcaptchaSecret,
-            response: captchaToken,
-          }),
-        });
-        const verifyData = await verifyRes.json();
-        if (!verifyData.success) {
-          return NextResponse.json(
-            { error: 'Captcha validation failed. Please solve the captcha challenge again.' },
-            { status: 400 }
-          );
-        }
-      } catch (captchaErr) {
-        console.warn('hCaptcha siteverify warning:', captchaErr);
-      }
+    const rawBody = await readBoundedBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
     }
 
-    if (!identifier || !identifier.trim()) {
-      return NextResponse.json({ error: 'Email or username is required.' }, { status: 400 });
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Malformed recovery request.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid recovery request.' }, { status: 400 });
     }
 
-    const cleanIdentifier = identifier.trim();
+    const { identifier, securityAnswer, captchaToken } = body as Record<string, unknown>;
+    if (
+      typeof identifier !== 'string' || identifier.trim().length < 3 || identifier.length > 254 ||
+      typeof captchaToken !== 'string' || captchaToken.length < 10 || captchaToken.length > 4096
+    ) {
+      return NextResponse.json({ error: 'Please provide your account identifier and complete the CAPTCHA.' }, { status: 400 });
+    }
+
+    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY?.trim();
+    const hcaptchaSitekey = process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY?.trim();
+    if (!hcaptchaSecret || !hcaptchaSitekey) {
+      console.error('[PASSWORD RECOVERY] CAPTCHA verification is not configured.');
+      return NextResponse.json({ error: 'Password recovery is temporarily unavailable.' }, { status: 503 });
+    }
+
+    const captchaForm = new URLSearchParams({
+      secret: hcaptchaSecret,
+      response: captchaToken,
+      sitekey: hcaptchaSitekey,
+    });
+
+    const captchaResponse = await fetch('https://api.hcaptcha.com/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: captchaForm,
+      signal: AbortSignal.timeout(5_000),
+      cache: 'no-store',
+    });
+    if (!captchaResponse.ok) {
+      return NextResponse.json({ error: 'CAPTCHA verification is temporarily unavailable.' }, { status: 503 });
+    }
+    const captchaResult = await captchaResponse.json();
+    if (captchaResult?.success !== true) {
+      return NextResponse.json({ error: 'CAPTCHA verification failed.' }, { status: 400 });
+    }
+
     const admin = getSupabaseAdminClient();
+    const cleanIdentifier = identifier.trim();
+    const isEmail = cleanIdentifier.includes('@');
+    const profileQuery = admin.from('profiles')
+      .select('id, security_question, security_answer_hash, security_answer')
+      .limit(2);
 
-    // 1. Locate the profile by email or username
-    let query = admin.from('profiles').select('id, email, username, security_question, security_answer');
-    
-    if (cleanIdentifier.includes('@')) {
-      query = query.ilike('email', cleanIdentifier);
-    } else {
-      query = query.ilike('username', cleanIdentifier);
+    const { data: matchingProfiles, error: profileError } = isEmail
+      ? await profileQuery.ilike('email', cleanIdentifier)
+      : await profileQuery.ilike('username', cleanIdentifier);
+
+    if (profileError) {
+      console.error('[PASSWORD RECOVERY] Profile lookup failed', { code: profileError.code || null });
+      return NextResponse.json({ error: 'Password recovery is temporarily unavailable.' }, { status: 503 });
     }
 
-    const { data: profile, error: findError } = await query.maybeSingle();
-
-    if (findError || !profile) {
-      // Return a safe error message to prevent enumeration while still being helpful
-      return NextResponse.json({ 
-        error: 'No account found matching this email or username. Please check your spelling.' 
-      }, { status: 404 });
+    // Do not reveal whether an account exists, has a security question, or passed
+    // the answer check. A verified Auth email is the only reset destination.
+    if (!Array.isArray(matchingProfiles) || matchingProfiles.length !== 1) {
+      return NextResponse.json(GENERIC_RESPONSE);
     }
 
-    // 2. Validate Security Question and Answer if configured on account
-    if (profile.security_answer) {
-      if (!securityAnswer || !securityAnswer.trim()) {
-        return NextResponse.json({ 
-          error: 'Please provide the answer to your security question.',
-          requiresQuestion: true,
-          question: profile.security_question || 'What was the name of your first pet?'
-        }, { status: 400 });
+    const profile = matchingProfiles[0];
+    const hasSecurityAnswer = Boolean(profile.security_answer_hash || profile.security_answer);
+    if (hasSecurityAnswer) {
+      if (typeof securityAnswer !== 'string' || securityAnswer.trim().length < 1 || securityAnswer.length > 512) {
+        return NextResponse.json(GENERIC_RESPONSE);
       }
 
-      const cleanStoredAnswer = (profile.security_answer || '').trim().toLowerCase();
-      const cleanProvidedAnswer = securityAnswer.trim().toLowerCase();
+      const verification = await verifySecurityAnswer(
+        securityAnswer,
+        profile.security_answer_hash,
+        profile.security_answer
+      );
+      if (!verification.valid) return NextResponse.json(GENERIC_RESPONSE);
 
-      if (cleanStoredAnswer !== cleanProvidedAnswer) {
-        return NextResponse.json({ 
-          error: 'The security answer provided is incorrect. Please try again.',
-          requiresQuestion: true,
-          question: profile.security_question || 'What was the name of your first pet?'
-        }, { status: 400 });
+      if (verification.needsRehash) {
+        const upgradedHash = await hashSecurityAnswer(securityAnswer);
+        const { data: upgradedRows, error: upgradeError } = await admin
+          .from('profiles')
+          .update({
+            security_answer_hash: upgradedHash,
+            security_answer: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', profile.id)
+          .select('id');
+
+        if (upgradeError || !Array.isArray(upgradedRows) || upgradedRows.length !== 1) {
+          console.error('[PASSWORD RECOVERY] Legacy security answer upgrade failed', {
+            code: upgradeError?.code || null,
+          });
+          return NextResponse.json({ error: 'Password recovery is temporarily unavailable.' }, { status: 503 });
+        }
       }
     }
 
-    const targetEmail = profile.email;
-    if (!targetEmail) {
-      return NextResponse.json({ error: 'Account does not have a verified email linked.' }, { status: 400 });
+    const { data: authUser, error: authUserError } = await admin.auth.admin.getUserById(profile.id);
+    const targetEmail = authUser?.user?.email;
+    if (authUserError || !targetEmail || !authUser.user.email_confirmed_at) {
+      return NextResponse.json(GENERIC_RESPONSE);
     }
 
-    // 3. Send password reset link to user's email
-    const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
-    const host = req.headers.get('host');
-    const origin = req.headers.get('origin') || (host ? `${forwardedProto}://${host}` : '') || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com';
+    const redirectUrl = new URL('/auth/callback', getTrustedRecoveryOrigin());
+    redirectUrl.searchParams.set('next', '/reset-password');
     const { error: resetError } = await admin.auth.resetPasswordForEmail(targetEmail, {
-      redirectTo: `${origin}/auth/callback?next=/reset-password`,
+      redirectTo: redirectUrl.toString(),
     });
 
     if (resetError) {
-      console.error('Password reset email error:', resetError);
-      return NextResponse.json({ error: resetError.message || 'Failed to send reset email' }, { status: 500 });
+      console.error('[PASSWORD RECOVERY] Auth reset request failed', { code: resetError.code || null });
+      return NextResponse.json({ error: 'Password recovery is temporarily unavailable.' }, { status: 503 });
     }
 
-    // Mask email for user privacy display
-    const parts = targetEmail.split('@');
-    const namePart = parts[0];
-    const domainPart = parts[1] || 'email.com';
-    const maskedName = namePart.length > 2 ? `${namePart.slice(0, 2)}***${namePart.slice(-1)}` : `${namePart}***`;
-    const maskedEmail = `${maskedName}@${domainPart}`;
-
-    return NextResponse.json({
-      success: true,
-      email: maskedEmail,
-      message: `Password reset link has been dispatched to ${maskedEmail}. Please check your inbox and spam folder.`,
+    return NextResponse.json(GENERIC_RESPONSE, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
-  } catch (err: any) {
-    console.error('Forgot password API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+  } catch (error) {
+    console.error('[PASSWORD RECOVERY] Request failed', {
+      error: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return NextResponse.json({ error: 'Password recovery is temporarily unavailable.' }, { status: 503 });
   }
 }

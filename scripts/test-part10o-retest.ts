@@ -650,6 +650,10 @@ async function runPart10ORetest() {
       .eq('id', BUYER_ID)
       .single();
 
+    if (!sellerProf || !buyerProf) {
+      throw new Error('Seller or buyer profile missing during profile-feedback regression check.');
+    }
+
     if (sellerProf.positive_feedback < 1 || buyerProf.positive_feedback < 1) {
       throw new Error(`Profile positive feedback not reflected: Seller=${sellerProf.positive_feedback}, Buyer=${buyerProf.positive_feedback}`);
     }

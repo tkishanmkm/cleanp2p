@@ -1508,7 +1508,7 @@ export async function sendTradeSystemMessage(
         `📥 BUYER INSTRUCTIONS (@${metadata.buyerUsername}):\n` +
         `${buyerSteps.join('\n')}\n\n` +
         `⚠️ SELLER INSTRUCTIONS (@${metadata.sellerUsername}):\n` +
-        `• The crypto funds (${amount} ${asset} + escrow fee) are securely locked in Paxones Escrow.\n` +
+        `• The crypto funds (${amount} ${asset} + escrow fee) are securely locked in Wayones Escrow.\n` +
         `• Do NOT transfer crypto outside of this platform. Wait for the buyer to mark as paid and verify the receiving account directly.`;
       break;
 
@@ -1529,7 +1529,7 @@ export async function sendTradeSystemMessage(
         `✅ TRADE COMPLETED SUCCESSFULLY\n` +
         `----------------------------------------\n` +
         `Seller @${metadata.sellerUsername} confirmed receipt and released ${amount} ${asset} from escrow.\n` +
-        `• ${amount} ${asset} has been credited to @${metadata.buyerUsername}'s Paxones wallet.\n` +
+        `• ${amount} ${asset} has been credited to @${metadata.buyerUsername}'s Wayones wallet.\n` +
         `• Please leave trade feedback below using only Positive or Negative.`;
       break;
 
@@ -1548,7 +1548,7 @@ export async function sendTradeSystemMessage(
         `----------------------------------------\n` +
         `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
         `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
-        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`;
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Wayones Support with your payment proof.`;
       break;
 
     case 'TRADE_DISPUTED':
@@ -1600,21 +1600,38 @@ export async function sendTradeSystemMessage(
     }
   }
 
-  const { data, error } = await supabase.from('trade_messages').insert({
-    trade_id: tradeId,
-    sender_id: '00000000-0000-0000-0000-000000000000',
-    sender_username: 'Paxones System',
-    is_system: true,
-    is_moderator: true,
-    message: messageText,
-    created_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    console.error('Failed to send trade system message:', error);
+  if (typeof window === 'undefined') {
+    const error = new Error('Server-side system messages must use the trusted trade-system-events writer.');
+    console.error(error.message);
+    return { data: null, error };
   }
 
-  return { data, error };
+  try {
+    const response = await fetch(`/api/trades/${encodeURIComponent(tradeId)}/system-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        metadata: {
+          ...metadata,
+          coinAmount: metadata.amount,
+          coinSymbol: metadata.asset,
+          paymentMethod: metadata.paymentMethodName,
+        },
+      }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || result?.success !== true) {
+      const error = new Error(result?.error || 'Trade system event was not accepted.');
+      console.error('Failed to send trade system event:', error.message);
+      return { data: null, error };
+    }
+    return { data: result.record || result, error: null };
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error('Trade system event request failed.');
+    console.error('Failed to send trade system event:', error.message);
+    return { data: null, error };
+  }
 }
 
 export function getSupportedPaymentMethods(): PaymentMethodProfile[] {
@@ -1649,6 +1666,7 @@ export interface SystemMessagePayload {
     | 'MARKED_PAID'
     | 'MESSAGE_BLOCKED'
     | 'SECURITY_REMINDER'
+    | 'MODERATOR_JOINED'
     | 'CUSTOM';
   sellerUsername?: string;
   buyerUsername?: string;
@@ -1666,6 +1684,29 @@ export interface SystemMessagePayload {
   feedbackComment?: string;
   customText?: string;
   targetUserId?: string;
+}
+
+/** Stable, non-cryptographic idempotency key for deduplicating system events. */
+export function buildSystemMessageDedupeKey(tradeId: string, type: string, metadata: Record<string, unknown> = {}): string {
+  const normalizedType = type.toUpperCase();
+  const lifecycleTypes = new Set([
+    'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
+    'TRADE_COMPLETED', 'TRADE_RELEASED', 'TRADE_CANCELLED', 'TRADE_EXPIRED', 'TRADE_DISPUTED',
+  ]);
+  if (lifecycleTypes.has(normalizedType)) return `${normalizedType}:lifecycle`.slice(0, 200);
+  const keys = [
+    'buyerUsername', 'sellerUsername', 'openerUsername', 'initiatorUsername', 'initiatorRole',
+    'targetUsername', 'targetRole', 'targetUserId', 'coinAmount', 'coinSymbol', 'amount', 'asset',
+    'fiatAmount', 'fiatCurrency', 'paymentMethod', 'paymentMethodName', 'reason', 'disputeReason',
+    'issueDetails', 'issueCategory', 'feedbackType', 'feedbackComment', 'customText',
+  ];
+  const stable = `${tradeId}|${type.toUpperCase()}|${keys.map((key) => `${key}=${String(metadata[key] ?? '')}`).join('|')}`;
+  let hash = 2166136261;
+  for (let index = 0; index < stable.length; index += 1) {
+    hash ^= stable.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${type.toUpperCase()}:${(hash >>> 0).toString(16)}`.slice(0, 200);
 }
 
 export function formatCryptoAmount(
@@ -1718,7 +1759,7 @@ export function formatSystemMessageContent(
       return (
         `🔒 TRADE INITIATED\n` +
         `------------------------\n` +
-        `• ${formattedAmount} ${cleanCoin} is safely held in Paxones Escrow.\n` +
+        `• ${formattedAmount} ${cleanCoin} is safely held in Wayones Escrow.\n` +
         `• Buyer (@${buyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +
         `• Seller (@${sellerUsername}): Do NOT release escrow until you have verified incoming funds in your own account/statement.\n` +
         `• Security: Never share passwords, OTPs, or communicate off-platform.`
@@ -1732,7 +1773,7 @@ export function formatSystemMessageContent(
       );
 
     case 'TRADE_CANCELLED':
-      return `Trade cancelled. Do not send or pay for this trade. If you have already made a payment, do not cancel or abandon the situation. Open a new trade immediately and contact Paxones Support if assistance is required.`;
+      return `Trade cancelled. Do not send or pay for this trade. If you have already made a payment, do not cancel or abandon the situation. Open a new trade immediately and contact Wayones Support if assistance is required.`;
 
     case 'TRADE_EXPIRED':
       return (
@@ -1740,7 +1781,7 @@ export function formatSystemMessageContent(
         `----------------------------------------\n` +
         `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
         `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
-        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Wayones Support with your payment proof.`
       );
 
     case 'TRADE_DISPUTED': {
@@ -1839,23 +1880,23 @@ export function formatSystemMessageContent(
       );
 
     case 'MODERATOR_JOINED':
-      return 'Paxones Moderator joined the trade chat.';
+      return 'Wayones Moderator joined the trade chat.';
 
     case 'MESSAGE_BLOCKED':
-      return `Message blocked: For your security, off-platform communication or trading instructions are not permitted in Paxones Trade Chat. Please keep all trade-related communication within Paxones.`;
+      return `Message blocked: For your security, off-platform communication or trading instructions are not permitted in Wayones Trade Chat. Please keep all trade-related communication within Wayones.`;
 
     case 'SECURITY_REMINDER':
-      return `Paxones Security Reminder: Never share your password, 2FA code, private key, seed phrase, or recovery phrase with another user. Paxones Support will not ask you to disclose these credentials.`;
+      return `Wayones Security Reminder: Never share your password, 2FA code, private key, seed phrase, or recovery phrase with another user. Wayones Support will not ask you to disclose these credentials.`;
 
     default:
-      return customText || 'Paxones System Notification';
+      return customText || 'Wayones System Notification';
   }
 }
 
 /**
- * Inserts an official Paxones System Message into the database.
- * If in the browser, dispatches via the secure /api/trades/[tradeId]/system-message route
- * to guarantee administrative insertion and Realtime synchronization.
+ * Writes system events to a separate table that is deliberately excluded from
+ * Supabase Realtime. User chat messages remain in trade_messages and keep their
+ * normal realtime behavior; system instructions are fetched/polled separately.
  */
 export async function insertPaxonesSystemMessage(
   supabase: SupabaseClient<any, any, any>,
@@ -1863,76 +1904,65 @@ export async function insertPaxonesSystemMessage(
 ): Promise<void> {
   const text = formatSystemMessageContent(payload);
   const now = new Date().toISOString();
-  const systemUuid = '00000000-0000-0000-0000-000000000000';
+  const dedupeKey = buildSystemMessageDedupeKey(payload.tradeId, payload.type, payload as unknown as Record<string, unknown>);
+  const localOnly = payload.type === 'MESSAGE_BLOCKED' || payload.type === 'SECURITY_REMINDER';
 
-  // 1. In browser environment: dispatch to server route for authorized service-role insertion
-  if (typeof window !== 'undefined' && payload.tradeId) {
+  const dispatchLocal = (id: string) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('paxones:trade-system-message', {
+      detail: {
+        id,
+        tradeId: payload.tradeId,
+        senderId: 'system',
+        senderUsername: 'Wayones System',
+        type: payload.type,
+        metadata: payload as unknown as Record<string, unknown>,
+        message: text,
+        isSystemMessage: true,
+        isModerator: true,
+        createdAt: now,
+      },
+    }));
+  };
+
+  if (typeof window !== 'undefined') {
+    if (localOnly) {
+      dispatchLocal(`local-${dedupeKey}`);
+      return;
+    }
     try {
-      const res = await fetch(`/api/trades/${encodeURIComponent(payload.tradeId)}/system-message`, {
+      const response = await fetch(`/api/trades/${encodeURIComponent(payload.tradeId)}/system-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: payload.type,
-          metadata: payload,
-          customText: payload.customText
-        })
+        body: JSON.stringify({ type: payload.type, metadata: payload }),
       });
-      if (res.ok) return;
-    } catch (e) {
-      console.warn('System message API route dispatch failed, falling back to direct client attempt:', e);
-    }
-  }
-
-  // 2. Direct database insertion (server-side context or fallback)
-  try {
-    const { error } = await supabase.from('trade_messages').insert([
-      {
-        trade_id: payload.tradeId,
-        sender_id: systemUuid,
-        sender_username: 'Paxones System',
-        message: text,
-        is_moderator: true,
-        visibility: 'all',
-        created_at: now
+      const result = await response.json().catch(() => null);
+      if (response.ok && result?.success === true) {
+        const record = result.record || {};
+        dispatchLocal(typeof record.id === 'string' ? record.id : `local-${dedupeKey}`);
+      } else {
+        console.warn('Trade system event was not persisted:', result?.error || 'request rejected');
       }
-    ]);
-
-    if (error) {
-      // If extra columns do not exist in database schema, fallback to core schema
-      const baseFallback = await supabase.from('trade_messages').insert([
-        {
-          trade_id: payload.tradeId,
-          sender_id: systemUuid,
-          message: text,
-          created_at: now
-        }
-      ]);
-      if (baseFallback.error) {
-        console.warn('Error inserting into trade_messages:', baseFallback.error);
-      }
+    } catch {
+      console.warn('Trade system event request failed; no database chat fallback was attempted.');
     }
-  } catch (err) {
-    console.warn('Error inserting into trade_messages:', err);
+    return;
   }
 
   try {
-    const { error } = await supabase
-      .from('trade_chat_messages')
-      .insert([
-        {
-          trade_id: payload.tradeId,
-          sender_id: systemUuid,
-          message: text,
-          is_system_message: true,
-          created_at: now
-        }
-      ]);
-
-    if (error) {
-      console.warn('Optional trade_chat_messages insert failed:', error);
-    }
+    const { error } = await supabase.from('trade_system_events').upsert({
+      trade_id: payload.tradeId,
+      sender_id: '00000000-0000-0000-0000-000000000000',
+      sender_username: 'Wayones System',
+      type: payload.type,
+      message: text,
+      metadata: payload as unknown as Record<string, unknown>,
+      dedupe_key: dedupeKey,
+      created_at: now,
+    }, { onConflict: 'trade_id,dedupe_key', ignoreDuplicates: true });
+    if (error) console.error('Failed to persist trade system event:', error.code || 'unknown');
   } catch {
-    // Optional fallback; keep the primary system message path non-fatal.
+    console.error('Failed to persist trade system event.');
   }
 }
 

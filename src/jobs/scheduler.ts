@@ -9,7 +9,6 @@ import 'dotenv/config';
 import cron from 'node-cron';
 import { runDepositIngestion } from './depositIngestion';
 import { runDepositSweeper } from './sweeperWorker';
-import { processPendingWithdrawals } from '../lib/withdrawal-processor';
 import { checkHotWalletBalance } from './hotWalletMonitor';
 import { processExpiredP2PTrades } from './p2pExpiryWorker';
 import { runMarketPriceUpdate } from './priceUpdaterWorker';
@@ -28,17 +27,8 @@ cron.schedule('* * * * *', async () => {
   }
 });
 
-// 2. Broadcast approved on-chain withdrawals with 2X Priority Gas every minute
-cron.schedule('* * * * *', async () => {
-  try {
-    const summary = await processPendingWithdrawals(10);
-    if (summary.processedCount > 0) {
-      console.log('[Scheduler: Withdrawals]', new Date().toISOString(), `Processed: ${summary.processedCount}, Success: ${summary.successful}`);
-    }
-  } catch (err: any) {
-    console.error('[Scheduler: Withdrawal Broadcaster Error]:', err?.message);
-  }
-});
+// Withdrawal dispatch intentionally removed: this redundant scheduler must never
+// call the legacy unleased processor. src/worker.ts owns the canonical fenced worker.
 
 // 3. Auto-sweep confirmed user balances to Hot Wallet every 5 minutes
 cron.schedule('*/5 * * * *', async () => {

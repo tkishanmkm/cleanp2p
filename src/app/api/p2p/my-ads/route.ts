@@ -7,11 +7,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+    const cookieStore = await cookies();
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey || /placeholder|your[_-]?project|your[_-]?anon[_-]?key/i.test(`${supabaseUrl} ${supabaseAnonKey}`)) {
+      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -32,22 +34,25 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    // Support Bearer token header if provided by frontend
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
+    // Select exactly one credential source. An explicitly supplied Bearer
+    // header must never fall back to a different browser-cookie identity.
+    const authHeader = request.headers.get('authorization');
     let user = null;
     let authError: any = null;
 
-    if (bearerToken) {
-      const tokenAuth = await supabase.auth.getUser(bearerToken);
-      user = tokenAuth.data?.user;
-      authError = tokenAuth.error;
-    }
+    if (authHeader !== null) {
+      const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+      const bearerToken = bearerMatch?.[1]?.trim() || null;
+      if (!bearerToken) {
+        return NextResponse.json({ error: 'Invalid authorization header.' }, { status: 401 });
+      }
 
-    if (!user) {
+      const tokenAuth = await supabase.auth.getUser(bearerToken);
+      user = tokenAuth.data?.user || null;
+      authError = tokenAuth.error;
+    } else {
       const cookieAuth = await supabase.auth.getUser();
-      user = cookieAuth.data?.user;
+      user = cookieAuth.data?.user || null;
       authError = cookieAuth.error;
     }
 
@@ -66,7 +71,8 @@ export async function GET(request: NextRequest) {
       .select('*')
       .eq('user_id', user.id)
       .neq('status', 'DELETED')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (!viewError && Array.isArray(viewAds)) {
       ads = viewAds;
@@ -79,7 +85,8 @@ export async function GET(request: NextRequest) {
         .select('*')
         .eq('user_id', user.id)
         .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (!tableError && Array.isArray(tableAds)) {
         ads = tableAds;
@@ -90,14 +97,15 @@ export async function GET(request: NextRequest) {
     }
 
     // 3. Fallback to admin client if RLS is preventing read
-    if (ads.length === 0) {
+    if (ads.length === 0 && queryError) {
       try {
         const { data: adminAds, error: adminErr } = await admin
           .from('ads')
           .select('*')
           .eq('user_id', user.id)
           .neq('status', 'DELETED')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(20);
 
         if (!adminErr && Array.isArray(adminAds) && adminAds.length > 0) {
           ads = adminAds;
@@ -108,7 +116,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Fetch user balances to compute live available crypto for each ad
+    if (queryError) {
+      console.error('Unable to load owned ads from the canonical ad sources:', queryError.code || 'UNKNOWN');
+      return NextResponse.json(
+        { success: false, code: 'OWNED_ADS_UNAVAILABLE', error: 'Your advertisements could not be loaded safely.' },
+        { status: 503 }
+      );
+    }
+
+    // Fetch user balances to compute live available crypto for each ad.
     const balances: Record<string, number> = {
       BTC: 0,
       ETH: 0,
@@ -117,56 +133,46 @@ export async function GET(request: NextRequest) {
     };
 
     try {
-      const [
-        { data: walletAssets },
-        { data: userWallets },
-        { data: chainWallets },
-        { data: profile }
-      ] = await Promise.all([
-        admin.from('wallet_assets').select('*').eq('user_id', user.id),
-        admin.from('user_wallets').select('*').eq('user_id', user.id),
-        admin.from('wallets').select('*').eq('user_id', user.id),
-        admin.from('profiles').select('btc_balance, eth_balance, usdt_balance, ltc_balance').eq('id', user.id).maybeSingle(),
-      ]);
+      // wallet_assets is the canonical wallet used by both withdrawal
+      // reservation and initiate_trade_with_escrow. The latter deducts escrow
+      // from balance and increments in_escrow in the same transaction, so
+      // balance is already the spendable amount. Legacy wallet mirrors must
+      // never be max-merged into this value because they can be stale.
+      const { data: walletAssets, error: walletAssetsError } = await admin
+        .from('wallet_assets')
+        .select('asset_symbol, balance, in_escrow, in_withdrawal')
+        .eq('user_id', user.id);
 
-      if (profile) {
-        if (profile.btc_balance) balances.BTC = Math.max(balances.BTC, Number(profile.btc_balance));
-        if (profile.eth_balance) balances.ETH = Math.max(balances.ETH, Number(profile.eth_balance));
-        if (profile.usdt_balance) balances.USDT = Math.max(balances.USDT, Number(profile.usdt_balance));
-        if (profile.ltc_balance) balances.LTC = Math.max(balances.LTC, Number(profile.ltc_balance));
+      if (walletAssetsError) {
+        console.error('Canonical wallet lookup failed for owned ads:', walletAssetsError.code || 'UNKNOWN');
+        return NextResponse.json(
+          { success: false, code: 'CANONICAL_WALLET_UNAVAILABLE', error: 'Your current available wallet balances could not be loaded.' },
+          { status: 503 }
+        );
       }
 
-      if (walletAssets && Array.isArray(walletAssets)) {
-        walletAssets.forEach((wa: any) => {
-          const sym = String(wa.asset_symbol || wa.asset_code || wa.symbol || wa.crypto || '').toUpperCase();
-          const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
-          if (sym && !isNaN(avail)) {
-            balances[sym] = Math.max(balances[sym] || 0, Math.max(0, avail));
-          }
-        });
-      }
+      for (const wallet of walletAssets || []) {
+        const symbol = String(wallet.asset_symbol || '').trim().toUpperCase();
+        const balance = Number(wallet.balance);
+        if (!symbol || !Number.isFinite(balance) || balance < 0) {
+          console.error('Canonical wallet balance requires reconciliation:', {
+            asset: symbol || 'UNKNOWN',
+            userId: user.id,
+          });
+          return NextResponse.json(
+            { success: false, code: 'WALLET_BALANCE_RECONCILIATION_REQUIRED', error: 'A wallet balance could not be verified. Ads were not assigned an available balance.' },
+            { status: 503 }
+          );
+        }
 
-      if (userWallets && Array.isArray(userWallets)) {
-        userWallets.forEach((w: any) => {
-          const sym = String(w.asset_symbol || '').toUpperCase();
-          const avail = Number(w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0)));
-          if (sym && !isNaN(avail)) {
-            balances[sym] = Math.max(balances[sym] || 0, Math.max(0, avail));
-          }
-        });
-      }
-
-      if (chainWallets && Array.isArray(chainWallets)) {
-        chainWallets.forEach((cw: any) => {
-          const sym = String(cw.currency || cw.chain || '').toUpperCase();
-          const avail = Number(cw.available_balance ?? cw.balance ?? 0);
-          if (sym && !isNaN(avail)) {
-            balances[sym] = Math.max(balances[sym] || 0, Math.max(0, avail));
-          }
-        });
+        balances[symbol] = balance;
       }
     } catch (balErr) {
-      console.warn('Failed to fetch user balances for my-ads:', balErr);
+      console.error('Canonical wallet balance lookup failed for my-ads:', balErr);
+      return NextResponse.json(
+        { success: false, code: 'CANONICAL_WALLET_UNAVAILABLE', error: 'Your current available wallet balances could not be loaded.' },
+        { status: 503 }
+      );
     }
 
     // Clean filter out any deleted items and attach live available balance
@@ -183,9 +189,6 @@ export async function GET(request: NextRequest) {
         };
       });
 
-    if (queryError && ads.length === 0) {
-      return NextResponse.json({ error: queryError.message, ads: [] }, { status: 200 });
-    }
 
     return NextResponse.json({ success: true, ads, balances });
   } catch (err: any) {

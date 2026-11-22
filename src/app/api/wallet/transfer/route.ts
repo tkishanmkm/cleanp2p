@@ -1,9 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
-import { verify2FAOTP } from '@/lib/2fa';
+import { verifyUserTotpForSensitiveAction } from '@/lib/2fa';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
 import { isTier2User } from '@/lib/kyc';
+import { isTransferAccountBlocked } from '@/lib/transfer-account-status';
+import { isValidTransferRpcResponse } from '@/lib/transfer-rpc-validation';
+import { getPlatformFeeSettings } from '@/lib/platform-fees';
+import { resolveDepositAddressOwner } from '@/lib/wallet/deposit-address-owner.server';
+import { DepositAddressOwnershipConflictError } from '@/lib/wallet/deposit-address-owner';
+
+function hasValidTransferAmountFormat(decimal: string): boolean {
+  if (!decimal || decimal.length > 27) return false;
+
+  let integerDigits = 0;
+  let fractionalDigits = 0;
+  let decimalSeen = false;
+
+  for (let index = 0; index < decimal.length; index += 1) {
+    const code = decimal.charCodeAt(index);
+    if (code === 46) {
+      if (decimalSeen || integerDigits === 0) return false;
+      decimalSeen = true;
+      continue;
+    }
+    if (code < 48 || code > 57) return false;
+    if (decimalSeen) {
+      fractionalDigits += 1;
+      if (fractionalDigits > 8) return false;
+    } else {
+      integerDigits += 1;
+      if (integerDigits > 18) return false;
+    }
+  }
+
+  return integerDigits > 0 && (!decimalSeen || fractionalDigits > 0);
+}
+
+function expandNumberToPlainDecimal(value: number): string {
+  const raw = value.toString().toLowerCase();
+  if (!raw.includes('e')) return raw;
+
+  const [coefficient, exponentText] = raw.split('e');
+  const exponent = Number(exponentText);
+  if (!Number.isInteger(exponent) || Math.abs(exponent) > 27) return '';
+
+  const [whole, fraction = ''] = coefficient.split('.');
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + exponent;
+
+  if (decimalIndex <= 0) {
+    return `0.${'0'.repeat(-decimalIndex)}${digits}`;
+  }
+  if (decimalIndex >= digits.length) {
+    return `${digits}${'0'.repeat(decimalIndex - digits.length)}`;
+  }
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function parseTransferAmount(value: unknown): { decimal: string; numeric: number } | null {
+  let decimal: string;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    decimal = expandNumberToPlainDecimal(value);
+  } else if (typeof value === 'string') {
+    decimal = value.trim();
+  } else {
+    return null;
+  }
+
+  if (!hasValidTransferAmountFormat(decimal)) {
+    return null;
+  }
+
+  const numeric = Number(decimal);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return { decimal, numeric };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +107,11 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+
     const {
       recipientInput,
       recipientUsername,
@@ -46,15 +123,28 @@ export async function POST(req: NextRequest) {
       idempotency_key,
       requestId,
     } = body;
-    
-    const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
-    const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
-    const numericAmount = Number(amount);
 
-    // Extract and validate client idempotency key
+    const rawTarget = typeof recipientInput === 'string'
+      ? recipientInput
+      : typeof recipientUsername === 'string'
+        ? recipientUsername
+        : '';
+    const targetIdentifier = rawTarget.trim();
+    const rawAsset = typeof asset === 'string'
+      ? asset
+      : typeof crypto === 'string'
+        ? crypto
+        : 'USDT';
+    const coinSymbol = rawAsset.toUpperCase().trim();
+    const parsedAmount = parseTransferAmount(amount);
+    const numericAmount = parsedAmount?.numeric ?? Number.NaN;
+
+    // Extract a bounded, predictable client idempotency key.
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
-    const rawKey = String(bodyIdempotencyKey || idempotency_key || requestId || headerIdempotencyKey || '').trim();
-    const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : null;
+    const rawKeyValue = [bodyIdempotencyKey, idempotency_key, requestId, headerIdempotencyKey]
+      .find((value) => typeof value === 'string' && value.trim().length > 0);
+    const rawKey = typeof rawKeyValue === 'string' ? rawKeyValue.trim() : '';
+    const idempotencyKey = /^[A-Za-z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -63,14 +153,17 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!targetIdentifier || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
-      return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
+    if (!targetIdentifier || !coinSymbol || !parsedAmount) {
+      return NextResponse.json({
+        error: 'Invalid transfer payload. Recipient and a positive amount with at most 8 decimal places are required.',
+        code: 'INVALID_TRANSFER_AMOUNT',
+      }, { status: 400 });
     }
 
     // 1. Fetch sender profile & check banned / restricted / emergency frozen status
     const { data: senderProfile } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+      .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_verified, id_verified, kyc_status, verification_tier')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -79,15 +172,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Block sender if banned, restricted, or emergency frozen
-    if (
-      senderProfile.is_banned ||
-      senderProfile.is_restricted ||
-      senderProfile.is_emergency_frozen ||
-      senderProfile.account_status === 'suspended' ||
-      senderProfile.account_status === 'banned' ||
-      senderProfile.account_status === 'restricted' ||
-      senderProfile.account_status === 'frozen'
-    ) {
+    if (isTransferAccountBlocked(senderProfile)) {
       return NextResponse.json({
         error: senderProfile.is_emergency_frozen
           ? 'USER_EMERGENCY_FROZEN: Your account is under an individual emergency freeze. Transfers are disabled.'
@@ -112,26 +197,48 @@ export async function POST(req: NextRequest) {
     const secret = senderProfile?.totp_secret || senderProfile?.two_factor_secret;
 
     if (is2faActive) {
-      if (!totpCode || typeof totpCode !== 'string' || totpCode.trim().length < 4) {
+      if (!totpCode) {
         return NextResponse.json({ error: '6-digit Authenticator TOTP code is required' }, { status: 403 });
       }
 
-      const isValidTotp = verify2FAOTP(secret, totpCode.trim(), is2faActive);
-      if (!isValidTotp) {
-        return NextResponse.json({ error: 'Invalid authenticator code. Please check your authenticator app.' }, { status: 401 });
+      const verification = await verifyUserTotpForSensitiveAction(
+        admin, user.id, secret, totpCode, 'transfer'
+      );
+      if (!verification.ok) {
+        return NextResponse.json(
+          { error: verification.error },
+          {
+            status: verification.status,
+            headers: verification.retryAfterSeconds
+              ? { 'Retry-After': String(verification.retryAfterSeconds) }
+              : undefined,
+          }
+        );
       }
     }
 
     // 3. Resolve recipient: Can be username, profile ID, user's email, or user's deposit address
-    let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; account_status?: string } | null = null;
+    let recipientProfile: {
+      id: string;
+      username: string;
+      is_banned?: boolean | null;
+      is_restricted?: boolean | null;
+      is_suspended?: boolean | null;
+      is_minor_restricted?: boolean | null;
+      is_emergency_frozen?: boolean | null;
+      account_status?: string | null;
+      status?: string | null;
+    } | null = null;
     const cleanTarget = targetIdentifier.replace(/^@/, '').trim();
+    // Treat user input literally in LIKE-based lookups; '%' and '_' otherwise act as wildcards.
+    const escapedTargetPattern = cleanTarget.replace(/[\\%_]/g, '\\$&');
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTarget);
 
     // 3a. Check by exact / case-insensitive username in profiles
     const { data: profByUsername } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, account_status')
-      .ilike('username', cleanTarget)
+      .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
+      .ilike('username', escapedTargetPattern)
       .maybeSingle();
 
     if (profByUsername) {
@@ -142,7 +249,7 @@ export async function POST(req: NextRequest) {
     if (!recipientProfile && isUuid) {
       const { data: profById } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
+        .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
         .eq('id', cleanTarget)
         .maybeSingle();
       if (profById) {
@@ -150,93 +257,68 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3c. Check by email or full_name in profiles if still not found
+    // 3c. Check email, then full name using parameterized PostgREST filters.
+    // Do not interpolate user input into an .or() filter expression: commas and
+    // filter operators in the identifier could change the query's meaning.
     if (!recipientProfile) {
-      const { data: profByEmail } = await admin
+      const { data: profByEmail, error: emailLookupError } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
-        .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
+        .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
+        .ilike('email', escapedTargetPattern)
         .maybeSingle();
-      if (profByEmail) {
+      if (!emailLookupError && profByEmail) {
         recipientProfile = profByEmail;
       }
     }
 
-    // 3d. Check if targetIdentifier is a deposit address of another platform user
     if (!recipientProfile) {
-      const { data: depAddr } = await admin
-        .from('deposit_addresses')
-        .select('user_id')
-        .eq('address', targetIdentifier)
+      const { data: profByFullName, error: fullNameLookupError } = await admin
+        .from('profiles')
+        .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
+        .ilike('full_name', escapedTargetPattern)
         .maybeSingle();
-
-      if (depAddr?.user_id) {
-        const { data: profByAddr } = await admin
-          .from('profiles')
-          .select('id, username, is_banned, is_restricted, account_status')
-          .eq('id', depAddr.user_id)
-          .maybeSingle();
-        if (profByAddr) {
-          recipientProfile = profByAddr;
-        }
+      if (!fullNameLookupError && profByFullName) {
+        recipientProfile = profByFullName;
       }
     }
 
-    // 3e. If still not found, check Supabase Auth admin to see if user exists in auth.users by email or username
+    // 3d. Resolve exact deposit-address ownership across both private registries.
+    // The helper fails closed if the two registries disagree about the owner.
     if (!recipientProfile) {
+      let depositAddressOwner: string | null;
       try {
-        const { data: authData } = await admin.auth.admin.listUsers();
-        if (authData?.users) {
-          const matchedAuthUser = authData.users.find((u) => {
-            const email = u.email?.toLowerCase() || '';
-            const emailPrefix = email.split('@')[0];
-            const metaUsername = (u.user_metadata?.username || '').toLowerCase();
-            const targetLower = cleanTarget.toLowerCase();
-            return (
-              email === targetLower ||
-              emailPrefix === targetLower ||
-              metaUsername === targetLower ||
-              u.id === cleanTarget
-            );
-          });
-
-          if (matchedAuthUser) {
-            // Find or insert profile for this user
-            const { data: existingProf } = await admin
-              .from('profiles')
-              .select('id, username, is_banned, is_restricted, account_status')
-              .eq('id', matchedAuthUser.id)
-              .maybeSingle();
-
-            if (existingProf) {
-              recipientProfile = existingProf;
-            } else {
-              // Auto-create/upsert basic profile so transfer succeeds seamlessly
-              const fallbackUsername = matchedAuthUser.user_metadata?.username || matchedAuthUser.email?.split('@')[0] || `user_${matchedAuthUser.id.slice(0, 6)}`;
-              const { data: newProf } = await admin
-                .from('profiles')
-                .upsert({
-                  id: matchedAuthUser.id,
-                  username: fallbackUsername,
-                  email: matchedAuthUser.email,
-                  account_status: 'ACTIVE',
-                })
-                .select('id, username, is_banned, is_restricted, account_status')
-                .single();
-
-              if (newProf) {
-                recipientProfile = newProf;
-              }
-            }
-          }
+        depositAddressOwner = await resolveDepositAddressOwner(admin, cleanTarget);
+      } catch (lookupError) {
+        if (lookupError instanceof DepositAddressOwnershipConflictError) {
+          return NextResponse.json(
+            { error: 'This deposit address has conflicting ownership records. Contact support before sending funds.', code: lookupError.code },
+            { status: 409 }
+          );
         }
-      } catch (authLookupErr) {
-        console.warn('Auth user search fallback notice in transfer:', authLookupErr);
+        throw lookupError;
+      }
+
+      if (depositAddressOwner) {
+        const { data: profByAddr, error: profileLookupError } = await admin
+          .from('profiles')
+          .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
+          .eq('id', depositAddressOwner)
+          .maybeSingle();
+
+        if (profileLookupError) {
+          throw new Error('Recipient profile could not be verified for this deposit address.');
+        }
+        if (profByAddr) recipientProfile = profByAddr;
       }
     }
 
+    // 3e. Do not enumerate Auth users or create profiles during a transfer.
+    // Recipient profiles must be provisioned by the normal signup/profile workflow.
+    // This avoids partial account creation, email-prefix misrouting, and dependence
+    // on the first page of the Auth admin user listing.
+
     if (!recipientProfile) {
-      return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
+      return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Wayones.` }, { status: 404 });
     }
 
     if (recipientProfile.id === user.id) {
@@ -244,15 +326,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Block recipient if banned, restricted, or emergency frozen
-    if (
-      recipientProfile.is_banned ||
-      recipientProfile.is_restricted ||
-      (recipientProfile as any).is_emergency_frozen ||
-      recipientProfile.account_status === 'suspended' ||
-      recipientProfile.account_status === 'banned' ||
-      recipientProfile.account_status === 'restricted' ||
-      recipientProfile.account_status === 'frozen'
-    ) {
+    if (isTransferAccountBlocked(recipientProfile)) {
       return NextResponse.json({
         error: `Cannot transfer: Recipient @${recipientProfile.username} is restricted or frozen on the platform.`,
       }, { status: 403 });
@@ -261,12 +335,24 @@ export async function POST(req: NextRequest) {
     const senderName = senderProfile?.username || 'Trader';
     const recipientName = recipientProfile.username || targetIdentifier.replace(/^@/, '');
 
+    let transferFeeRate: number;
+    try {
+      const feeSettings = await getPlatformFeeSettings();
+      transferFeeRate = feeSettings.platformFeePercent / 100;
+    } catch (feeError) {
+      console.error('[Internal Transfer] Fee settings could not be verified:', feeError);
+      return NextResponse.json({
+        error: 'Transfer fee settings are temporarily unavailable. Please retry.',
+        code: 'TRANSFER_FEE_CONFIG_UNAVAILABLE',
+      }, { status: 503 });
+    }
+
     // 4. Delegate atomic transfer, balance updates, ledgering, and transfer recording to canonical database RPC
     const { data: rpcResult, error: rpcError } = await admin.rpc('execute_internal_transfer', {
       p_sender_id: user.id,
       p_recipient_username: recipientProfile.username,
       p_asset: coinSymbol,
-      p_gross_amount: numericAmount,
+      p_gross_amount: parsedAmount.decimal,
       p_idempotency_key: idempotencyKey,
     });
 
@@ -289,6 +375,9 @@ export async function POST(req: NextRequest) {
       gross_amount?: number | string;
       net_amount?: number | string;
       fee_amount?: number | string;
+      fee_rate?: number | string | null;
+      fee?: number | string;
+      total_deduction?: number | string;
       sender_balance_after?: number | string;
       recipient_balance_after?: number | string;
       status?: string;
@@ -306,32 +395,33 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Verify critical financial fields are strictly present from the RPC output
-    if (
-      !transferData.transfer_id ||
-      transferData.gross_amount === undefined ||
-      transferData.gross_amount === null ||
-      transferData.net_amount === undefined ||
-      transferData.net_amount === null ||
-      transferData.fee_amount === undefined ||
-      transferData.fee_amount === null
-    ) {
-      console.error('[Internal Transfer] Malformed RPC response missing financial fields:', transferData);
+    // Verify identity, asset, amount, and all financial fields before reporting success.
+    // The database RPC has already committed atomically; this guard prevents a malformed
+    // or mismatched result from being presented to the caller as a valid receipt.
+    if (!isValidTransferRpcResponse(transferData, {
+      senderId: user.id,
+      recipientId: recipientProfile.id,
+      asset: coinSymbol,
+      amount: numericAmount,
+    })) {
+      console.error('[Internal Transfer] RPC response failed financial integrity validation.');
       return NextResponse.json({
-        error: 'Transfer failed: Incomplete financial response received from database.',
+        error: 'Transfer result could not be safely verified. Contact support before retrying.',
         code: 'INVALID_RPC_RESPONSE',
       }, { status: 500 });
     }
 
     const isIdempotentReplay = Boolean(transferData.idempotent_replay);
+    const reportedFeeRate = transferData.fee_rate != null ? Number(transferData.fee_rate) : null;
+    const appliedTransferFeeRate = reportedFeeRate !== null && Number.isFinite(reportedFeeRate)
+      ? reportedFeeRate
+      : transferFeeRate;
     const transferId = String(transferData.public_id || transferData.transfer_id);
     const dbTransferId = String(transferData.transfer_id);
     const grossAmount = Number(transferData.gross_amount);
-    const netAmount = Number(transferData.net_amount || transferData.gross_amount);
-    const feeAmount = Number(transferData.fee_amount || transferData.fee || 0);
-    const totalDeduction = transferData.total_deduction != null 
-      ? Number(transferData.total_deduction) 
-      : Number((grossAmount + feeAmount).toFixed(8));
+    const netAmount = Number(transferData.net_amount);
+    const feeAmount = Number(transferData.fee_amount);
+    const totalDeduction = Number(transferData.total_deduction);
     const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
     const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
     const transferStatus = String(transferData.status || 'confirmed').toLowerCase();
@@ -342,7 +432,7 @@ export async function POST(req: NextRequest) {
         await admin.from('notifications').insert({
           user_id: user.id,
           title: 'Transfer Sent',
-          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
+          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(appliedTransferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
           type: 'transfer',
           is_read: false,
           metadata: { link: '/wallet' },
@@ -355,7 +445,7 @@ export async function POST(req: NextRequest) {
 
     const message = isIdempotentReplay
       ? `Transfer was already completed previously (ID: ${transferId}).`
-      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
+      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(appliedTransferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
 
     return NextResponse.json({
       success: true,

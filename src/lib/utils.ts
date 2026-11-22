@@ -30,11 +30,24 @@ export function toDate(timestamp: any): Date | null {
 export const USERNAME_REGEX = /^[a-z0-9._]{5,25}$/;
 
 /**
- * Dynamic URL helper ensuring local testing stays on localhost while production resolves to paxones.com
+ * Canonical production URL helper. Local and preview origins remain available
+ * during development, while production-generated links always use Wayones.
  */
 export const getURL = () => {
-  let url = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://paxones.com';
-  return url.endsWith('/') ? url : `${url}/`;
+  const configured = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (configured && process.env.NODE_ENV !== 'production') {
+    try {
+      const normalized = configured.includes('://') ? configured : 'https://' + configured;
+      const parsed = new URL(normalized);
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' ||
+          parsed.hostname.endsWith('.onrender.com') || parsed.hostname.endsWith('.vercel.app')) {
+        return parsed.origin.endsWith('/') ? parsed.origin : parsed.origin + '/';
+      }
+    } catch {
+      // Invalid or legacy production URL falls back to the canonical public origin.
+    }
+  }
+  return 'https://wayones.com/';
 };
 
 

@@ -12,8 +12,7 @@ import { useAdminStatus } from '@/hooks/use-admin-status';
 import {
   adminCancelTrade,
   adminMarkTradeAsPaid,
-  adminReleaseFunds,
-  resolveDispute
+  adminReleaseFunds
 } from '@/lib/admin-actions';
 import {
   markTradeAsPaid,
@@ -24,7 +23,7 @@ import { cn, toDate, playTradeBeep } from '@/lib/utils';
 import { formatUserDateTimeArial, formatUtcDateTime } from '@/lib/date-utils';
 import { useUserTimezone } from '@/hooks/use-user-timezone';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
-import type { Trade, P2PAd, Dispute, Feedback } from '@/lib/types';
+import type { Trade, P2PAd, Feedback } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -89,6 +88,7 @@ import {
 } from 'lucide-react';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import AdminActionDialog, { AdminActionType } from '@/components/admin/admin-action-dialog';
+import { useI18n } from '@/context/i18n-context';
 
 export function CoinInsignia({ symbol, className = "h-4 w-4" }: { symbol: string; className?: string }) {
   const s = (symbol || '').toUpperCase();
@@ -203,7 +203,7 @@ const ParticipantRow = ({
       // If it's a UUID, fetch profile
       if (userId.includes('-')) {
         const { data } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('username, merchant_tier')
           .eq('id', userId)
           .maybeSingle();
@@ -275,6 +275,7 @@ export function ReportIssueDialog({
 }) {
   const supabase = createClient();
   const { toast } = useToast();
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<string>('');
   const [details, setDetails] = useState('');
@@ -298,62 +299,42 @@ export function ReportIssueDialog({
 
   const handleSubmitIssue = async () => {
     if (!selectedIssue) {
-      toast({ variant: 'destructive', title: 'Select an Issue', description: 'Please choose an issue category.' });
+      toast({ variant: 'destructive', title: t('tradeActionPage.selectIssueToastTitle'), description: t('tradeActionPage.selectIssueToastDescription') });
       return;
     }
     if (!details.trim()) {
-      toast({ variant: 'destructive', title: 'Details Required', description: 'Please describe what occurred.' });
+      toast({ variant: 'destructive', title: t('tradeActionPage.detailsRequiredToastTitle'), description: t('tradeActionPage.detailsRequiredToastDescription') });
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // 1. Insert into disputes/support table
-      await supabase.from('disputes').insert([
-        {
-          trade_id: trade.id,
-          opened_by: currentUserId,
-          reason: selectedIssue,
-          explanation: details.trim(),
-          status: 'open',
-          created_at: new Date().toISOString()
-        }
-      ]);
-
-      // 2. Post as system message into trade_messages
-      await insertPaxonesSystemMessage(supabase, {
-        tradeId: trade.id,
-        type: 'ISSUE_REPORTED',
-        openerUsername: currentUsername || 'Trader',
-        issueCategory: selectedIssue,
-        issueDetails: details.trim()
+      // Disputes are created by the canonical server route, which verifies
+      // trade participation and calls the actor-bound raise_trade_dispute RPC.
+      // Do not write to public.disputes or notifications from the browser.
+      const response = await fetch(`/api/trades/${encodeURIComponent(trade.id)}/dispute`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: `${selectedIssue}\n\n${details.trim()}`,
+        }),
       });
-
-      // 3. Create notification for opponent
-      if (counterpartId) {
-        await supabase.from('notifications').insert([
-          {
-            user_id: counterpartId,
-            title: 'Issue Reported',
-            message: `@${currentUsername} filed an issue report for trade ${formatTradeId(trade.id)}: ${selectedIssue}`,
-            type: 'report',
-            metadata: { link: `/trade/${trade.id}` },
-            is_read: false,
-            created_at: new Date().toISOString()
-          }
-        ]);
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.success !== true) {
+        throw new Error(result?.error || 'The dispute was not confirmed by the server.');
       }
 
       toast({
-        title: 'Issue Reported',
-        description: 'Our moderation team has received your report and logged it to the trade room.'
+        title: t('tradeActionPage.reportSuccessTitle'),
+        description: t('tradeActionPage.reportSuccessDescription')
       });
       setHasUserReported(true);
       setIsOpen(false);
       setSelectedIssue('');
       setDetails('');
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Report Failed', description: err.message });
+      toast({ variant: 'destructive', title: t('tradeActionPage.reportFailedTitle'), description: err.message });
     } finally {
       setIsSubmitting(false);
     }
@@ -366,7 +347,7 @@ export function ReportIssueDialog({
         className="w-full py-2.5 bg-muted/80 text-muted-foreground font-bold text-xs sm:text-sm rounded-xl border border-border/80 shadow-none flex items-center justify-center gap-2 cursor-not-allowed opacity-90"
       >
         <UserCheck className="h-4 w-4 text-emerald-500" />
-        <span>Reported</span>
+        <span>{t('tradeActionPage.reported')}</span>
       </Button>
     );
   }
@@ -378,31 +359,31 @@ export function ReportIssueDialog({
           className="w-full py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold text-xs sm:text-sm rounded-xl border border-red-600 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
           <ShieldAlert className="h-4 w-4 shrink-0" />
-          <span>Report an Issue</span>
+          <span>{t('tradeActionPage.reportButton')}</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md bg-card border-border">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <AlertTriangle className="h-5 w-5" />
-            Report an Issue / Fraud
+            {t('tradeActionPage.reportDialogTitle')}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Submit a formal report to Pax moderation. This will be recorded in the trade audit log.
+            {t('tradeActionPage.reportDialogDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold">Select Issue Category (8 Options)</Label>
+            <Label className="text-xs font-bold">{t('tradeActionPage.issueCategoryLabel')}</Label>
             <Select value={selectedIssue} onValueChange={setSelectedIssue}>
               <SelectTrigger className="w-full text-xs">
-                <SelectValue placeholder="Choose the issue type..." />
+                <SelectValue placeholder={t('tradeActionPage.issuePlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {ISSUE_OPTIONS.map((opt, idx) => (
                   <SelectItem key={idx} value={opt} className="text-xs">
-                    {idx + 1}. {opt}
+                    {idx + 1}. {t('tradeActionPage.issueOption' + (idx + 1))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -410,9 +391,9 @@ export function ReportIssueDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold">Additional Details & Evidence</Label>
+            <Label className="text-xs font-bold">{t('tradeActionPage.issueDetailsLabel')}</Label>
             <Textarea
-              placeholder="Provide specific transaction references, timestamps, or description..."
+              placeholder={t('tradeActionPage.evidencePlaceholder')}
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               className="text-xs min-h-[90px]"
@@ -422,7 +403,7 @@ export function ReportIssueDialog({
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant="destructive"
@@ -431,7 +412,7 @@ export function ReportIssueDialog({
             disabled={isSubmitting || !selectedIssue || !details.trim()}
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-            Submit Report
+            {t('tradeActionPage.submitReport')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -451,6 +432,7 @@ function OpenDisputeDialog({
   disabled: boolean;
 }) {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState('Payment Issue');
   const [customReason, setCustomReason] = useState('');
@@ -465,15 +447,23 @@ function OpenDisputeDialog({
     'Trade partner unresponsive',
     'Custom'
   ];
+  const disputeReasonLabels: Record<string, string> = {
+    'Payment Issue': t('tradeActionPage.reasonPaymentIssue'),
+    'Intentional coin locking': t('tradeActionPage.reasonIntentionalLocking'),
+    'Buyer not paid and marked paid': t('tradeActionPage.reasonBuyerPaidNotSent'),
+    'Seller is not releasing': t('tradeActionPage.reasonSellerNotReleasing'),
+    'Trade partner unresponsive': t('tradeActionPage.reasonPartnerUnresponsive'),
+    Custom: t('tradeActionPage.reasonCustom'),
+  };
 
   const handleSubmit = async () => {
     const finalReason = selectedReason === 'Custom' ? (customReason.trim() || 'Custom Reason') : selectedReason;
     if (!explanation.trim()) {
-      toast({ variant: 'destructive', title: 'Explanation required', description: 'Please provide dispute details.' });
+      toast({ variant: 'destructive', title: t('tradeActionPage.explanationRequiredToastTitle'), description: t('tradeActionPage.explanationRequiredToastDescription') });
       return;
     }
     if (selectedReason === 'Custom' && !customReason.trim()) {
-      toast({ variant: 'destructive', title: 'Custom reason required', description: 'Please specify your custom dispute reason.' });
+      toast({ variant: 'destructive', title: t('tradeActionPage.customReasonRequiredToastTitle'), description: t('tradeActionPage.customReasonRequiredToastDescription') });
       return;
     }
     setIsSubmitting(true);
@@ -486,7 +476,7 @@ function OpenDisputeDialog({
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        throw new Error(data.error || 'Failed to open dispute');
+        throw new Error(data.error || t('tradeActionPage.disputeFailedToastTitle'));
       }
 
       if (typeof window !== 'undefined') {
@@ -502,10 +492,10 @@ function OpenDisputeDialog({
         );
       }
 
-      toast({ title: 'Dispute Opened', description: 'A moderator has been assigned to this trade.' });
+      toast({ title: t('tradeActionPage.disputeOpenedToastTitle'), description: t('tradeActionPage.disputeOpenedToastDescription') });
       setIsOpen(false);
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Dispute Failed', description: err.message });
+      toast({ variant: 'destructive', title: t('tradeActionPage.disputeFailedToastTitle'), description: err.message });
     } finally {
       setIsSubmitting(false);
     }
@@ -515,27 +505,27 @@ function OpenDisputeDialog({
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button variant="destructive" className="w-full text-xs font-bold" disabled={disabled}>
-          <ShieldAlert className="mr-2 h-4 w-4" /> Open Official Dispute
+          <ShieldAlert className="mr-2 h-4 w-4" /> {t('tradeActionPage.openDisputeButton')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Open Official Dispute</DialogTitle>
+          <DialogTitle>{t('tradeActionPage.openDisputeTitle')}</DialogTitle>
           <DialogDescription>
-            An escrow mediator will join the chat to review payment proofs and resolve this trade.
+            {t('tradeActionPage.openDisputeDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div>
-            <Label className="text-xs">Dispute Reason</Label>
+            <Label className="text-xs">{t('tradeActionPage.reasonLabel')}</Label>
             <Select value={selectedReason} onValueChange={setSelectedReason}>
               <SelectTrigger className="text-xs mt-1">
-                <SelectValue placeholder="Select dispute reason" />
+                <SelectValue placeholder={t('tradeActionPage.reasonPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {disputeReasons.map((r) => (
                   <SelectItem key={r} value={r} className="text-xs">
-                    {r}
+                    {disputeReasonLabels[r] || r}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -543,30 +533,30 @@ function OpenDisputeDialog({
           </div>
           {selectedReason === 'Custom' && (
             <div>
-              <Label className="text-xs">Custom Reason</Label>
+              <Label className="text-xs">{t('tradeActionPage.customReasonLabel')}</Label>
               <Input
                 value={customReason}
                 onChange={(e) => setCustomReason(e.target.value)}
-                placeholder="Enter custom dispute reason..."
+                placeholder={t('tradeActionPage.customReasonPlaceholder')}
                 className="text-xs mt-1"
               />
             </div>
           )}
           <div>
-            <Label className="text-xs">Explanation</Label>
+            <Label className="text-xs">{t('tradeActionPage.explanationLabel')}</Label>
             <Textarea
               value={explanation}
               onChange={(e) => setExplanation(e.target.value)}
-              placeholder="Explain the situation in detail..."
+              placeholder={t('tradeActionPage.explanationPlaceholder')}
               className="text-xs mt-1"
             />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setIsOpen(false)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => setIsOpen(false)}>{t('common.cancel')}</Button>
           <Button variant="destructive" onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Confirm Dispute
+            {t('tradeActionPage.confirmDispute')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -653,6 +643,7 @@ const ActionButtons = ({
   resolvedDispute?: any;
 }) => {
   const { toast } = useToast();
+  const { t } = useI18n();
   const tradeStatus = resolveTradeStatus(trade);
   const isBuyer = currentUserRole === 'buy';
   const isTradeExpired = Boolean(isExpired || tradeStatus === 'expired');
@@ -698,22 +689,11 @@ const ActionButtons = ({
       const check2FA = async () => {
         try {
           const supabase = createClient();
-          const { data } = await supabase
-            .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
-            .or(`id.eq.${currentUserId},user_id.eq.${currentUserId}`)
-            .maybeSingle();
-          if (data) {
-            setIs2faActive(
-              Boolean(
-                data.is_2fa_enabled === true ||
-                data.is_2fa_enabled === 'true' ||
-                data.is_mfa_enabled === true ||
-                data.is_mfa_enabled === 'true' ||
-                data.two_factor_enabled === true ||
-                data.two_factor_enabled === 'true'
-              )
-            );
+          const { data, error } = await supabase.rpc('get_user_2fa_status', {
+            p_user_id: currentUserId,
+          });
+          if (!error && typeof data === 'boolean') {
+            setIs2faActive(data);
           }
         } catch (err) {
           console.warn('Failed to check 2FA status:', err);
@@ -755,7 +735,7 @@ const ActionButtons = ({
         body: JSON.stringify({ action: 'MARK_PAID', paymentMethod: selectedMarkPaidMethod })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Failed to mark as paid');
+      if (!res.ok || data.error) throw new Error(data.error || t('tradeActionPage.markPaidFailed'));
 
       const nowIso = new Date().toISOString();
       if (trade) {
@@ -780,21 +760,21 @@ const ActionButtons = ({
         );
       }
 
-      toast({ title: 'Trade Marked as Paid', description: 'The seller has been notified to verify payment and release coin.' });
+      toast({ title: t('tradeActionPage.markPaidToastTitle'), description: t('tradeActionPage.markPaidToastDescription') });
       setIsPaidConfirmOpen(false);
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
+      toast({ variant: 'destructive', title: t('tradeActionPage.errorTitle'), description: e.message });
     } finally {
       setIsSubmittingAction(false);
     }
   };
 
   const handleReleaseCrypto = async () => {
-    if (is2faActive && (!totpCode || totpCode.trim().length < 4)) {
+    if (is2faActive && !/^\d{6}$/.test(totpCode.trim())) {
       toast({
         variant: 'destructive',
-        title: '2FA Code Required',
-        description: 'Please enter your 4-8 digit authenticator OTP code to release escrow.',
+        title: t('tradeActionPage.twoFactorRequired'),
+        description: t('tradeActionPage.otpHelper'),
       });
       return;
     }
@@ -807,7 +787,7 @@ const ActionButtons = ({
         body: JSON.stringify({ action: 'RELEASE_ESCROW', totpCode: totpCode.trim() })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Failed to release escrow');
+      if (!res.ok || data.error) throw new Error(data.error || t('tradeActionPage.releaseFailed'));
 
       const nowIso = new Date().toISOString();
       if (trade) {
@@ -830,11 +810,11 @@ const ActionButtons = ({
         );
       }
 
-      toast({ title: 'Escrow Released', description: 'Funds successfully transferred to buyer wallet.' });
+      toast({ title: t('tradeActionPage.escrowReleasedToastTitle'), description: t('tradeActionPage.escrowReleasedToastDescription') });
       setIsReleaseConfirmOpen(false);
       setTotpCode('');
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
+      toast({ variant: 'destructive', title: t('tradeActionPage.errorTitle'), description: e.message });
     } finally {
       setIsSubmittingAction(false);
     }
@@ -844,8 +824,8 @@ const ActionButtons = ({
     if (isPaidOrMarked || isTradeInDispute || isTerminal) {
       toast({
         variant: 'destructive',
-        title: 'Cancellation Prohibited',
-        description: 'Trades that have been marked as paid, are in dispute, or are completed/cancelled cannot be cancelled.',
+        title: t('tradeActionPage.cancellationProhibitedTitle'),
+        description: t('tradeActionPage.cancellationProhibitedDescription'),
       });
       return;
     }
@@ -858,7 +838,7 @@ const ActionButtons = ({
         body: JSON.stringify({ action: 'CANCEL_TRADE', reason: 'Cancelled by buyer (confirmed no payment sent)' })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Failed to cancel trade');
+      if (!res.ok || data.error) throw new Error(data.error || t('tradeActionPage.cancelFailed'));
 
       const nowIso = new Date().toISOString();
       if (trade) {
@@ -884,9 +864,9 @@ const ActionButtons = ({
         );
       }
 
-      toast({ title: 'Trade Cancelled', description: 'Escrow deposit returned to seller.' });
+      toast({ title: t('tradeActionPage.tradeCancelledToastTitle'), description: t('tradeActionPage.tradeCancelledToastDescription') });
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
+      toast({ variant: 'destructive', title: t('tradeActionPage.errorTitle'), description: e.message });
     } finally {
       setIsSubmittingAction(false);
     }
@@ -899,21 +879,21 @@ const ActionButtons = ({
           <AlertDialog open={isPaidConfirmOpen} onOpenChange={setIsPaidConfirmOpen}>
             <AlertDialogTrigger asChild>
               <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md transition-all">
-                <CheckCircle2 className="mr-1.5 h-4 w-4" /> I Have Paid
+                <CheckCircle2 className="mr-1.5 h-4 w-4" /> {t('tradeActionPage.markPaidButton')}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="bg-card text-card-foreground border-border">
               <AlertDialogHeader>
-                <AlertDialogTitle className="text-foreground">Confirm Payment Sent</AlertDialogTitle>
+                <AlertDialogTitle className="text-foreground">{t('tradeActionPage.confirmPaymentTitle')}</AlertDialogTitle>
                 <AlertDialogDescription className="text-muted-foreground">
-                  Ensure you have transferred exact fiat to the seller&apos;s payment account before confirming.
+                  {t('tradeActionPage.confirmPaymentDescription')}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               {adPaymentMethods.length > 1 ? (
                 <div className="space-y-1.5 py-2 text-left">
                   <label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                    <span>Payment Method Used:</span>
-                    <span className="text-rose-500 font-bold">* Required</span>
+                    <span>{t('tradeActionPage.paymentMethodUsed')}</span>
+                    <span className="text-rose-500 font-bold">* {t('tradeActionPage.required')}</span>
                   </label>
                   <select
                     value={selectedMarkPaidMethod}
@@ -929,15 +909,15 @@ const ActionButtons = ({
                 </div>
               ) : (
                 <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-muted/40 border text-xs my-1">
-                  <span className="text-muted-foreground font-medium">Payment Method:</span>
+                  <span className="text-muted-foreground font-medium">{t('tradeActionPage.paymentMethod')}</span>
                   <span className="font-semibold text-foreground">{selectedMarkPaidMethod}</span>
                 </div>
               )}
               <AlertDialogFooter>
-                <AlertDialogCancel>Go Back</AlertDialogCancel>
+                <AlertDialogCancel>{t('tradeActionPage.goBack')}</AlertDialogCancel>
                 <AlertDialogAction onClick={handleMarkAsPaid} disabled={isSubmittingAction} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                  Confirm Paid
+                  {t('tradeActionPage.confirmPaid')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -954,14 +934,14 @@ const ActionButtons = ({
           >
             <AlertDialogTrigger asChild>
               <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md transition-all">
-                <ShieldCheck className="mr-1.5 h-4 w-4" /> Release Escrow
+                <ShieldCheck className="mr-1.5 h-4 w-4" /> {t('tradeActionPage.releaseButton')}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md bg-card text-card-foreground border-border">
               <AlertDialogHeader>
-                <AlertDialogTitle className="text-foreground">Release Escrow Coin?</AlertDialogTitle>
+                <AlertDialogTitle className="text-foreground">{t('tradeActionPage.releaseTitle')}</AlertDialogTitle>
                 <AlertDialogDescription className="text-muted-foreground">
-                  WARNING: This action is irreversible. Only release after verifying full payment in your bank/wallet account.
+                  {t('tradeActionPage.releaseWarning')}
                 </AlertDialogDescription>
               </AlertDialogHeader>
 
@@ -970,35 +950,35 @@ const ActionButtons = ({
                   <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
                     <Label htmlFor="release-totp" className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
                       <Shield className="h-4 w-4" />
-                      Two-Factor Authentication (2FA) Required
+                      {t('tradeActionPage.twoFactorRequired')}
                     </Label>
                     <Input
                       id="release-totp"
                       type="text"
                       inputMode="numeric"
                       autoComplete="one-time-code"
-                      maxLength={8}
-                      placeholder="Enter 4-8 digit authenticator OTP"
+                      maxLength={6}
+                      placeholder={t('tradeActionPage.otpPlaceholder')}
                       value={totpCode}
-                      onChange={(e) => setTotpCode(e.target.value)}
+                      onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="font-mono text-center tracking-widest bg-background"
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      Enter the one-time password generated by your authenticator app to authorize this release.
+                      {t('tradeActionPage.otpHelper')}
                     </p>
                   </div>
                 </div>
               )}
 
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={handleReleaseCrypto}
-                  disabled={isSubmittingAction || (is2faActive && totpCode.trim().length < 4)}
+                  disabled={isSubmittingAction || (is2faActive && !/^\d{6}$/.test(totpCode.trim()))}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                 >
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                  Confirm & Release Escrow
+                  {t('tradeActionPage.confirmRelease')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1009,17 +989,17 @@ const ActionButtons = ({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" className="w-full text-xs font-bold text-destructive border-destructive/30 hover:bg-destructive/10">
-                <XCircle className="mr-1.5 h-3.5 w-3.5" /> Cancel Trade
+                <XCircle className="mr-1.5 h-3.5 w-3.5" /> {t('tradeActionPage.cancelTradeButton')}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md">
               <AlertDialogHeader>
                 <AlertDialogTitle className="text-base text-destructive flex items-center gap-2">
                   <AlertCircle className="h-5 w-5" />
-                  Are you sure you want to cancel this trade?
+                  {t('tradeActionPage.cancelConfirmTitle')}
                 </AlertDialogTitle>
                 <AlertDialogDescription className="text-xs text-foreground/80">
-                  Only confirm cancellation if you have not made the required payment. The locked escrow deposit will be immediately returned to the seller.
+                  {t('tradeActionPage.cancelConfirmDescription')}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="space-y-3 py-2">
@@ -1031,30 +1011,30 @@ const ActionButtons = ({
                     className="mt-0.5"
                   />
                   <Label htmlFor="did-not-pay-check" className="text-xs font-semibold leading-snug cursor-pointer">
-                    I confirm that I have not sent payment
+                    {t('tradeActionPage.notSentPayment')}
                   </Label>
                 </div>
               </div>
               <AlertDialogFooter>
-                <AlertDialogCancel>Keep Trade</AlertDialogCancel>
+                <AlertDialogCancel>{t('tradeActionPage.keepTrade')}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={handleCancelTrade}
                   disabled={!didNotPayChecked || isSubmittingAction}
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                  Confirm Cancellation
+                  {t('tradeActionPage.confirmCancellation')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
         )}
 
-        {tradeStatus === 'paid' && currentUserId && !activeDispute && tradeStatus !== 'disputed' && (
+        {tradeStatus === 'paid' && currentUserId && !activeDispute && (
           <div className="space-y-2">
             {!isDisputeEligible && (
               <p className="text-[11px] text-muted-foreground text-center">
-                Dispute available in: <span className="font-mono font-bold text-foreground">{String(disputeTimeRemaining.hours).padStart(2, '0')}:{String(disputeTimeRemaining.minutes).padStart(2, '0')}:{String(disputeTimeRemaining.seconds).padStart(2, '0')}</span> (3 hours after payment)
+                {t('tradeActionPage.disputeAvailableIn')} <span className="font-mono font-bold text-foreground">{String(disputeTimeRemaining.hours).padStart(2, '0')}:{String(disputeTimeRemaining.minutes).padStart(2, '0')}:{String(disputeTimeRemaining.seconds).padStart(2, '0')}</span> {t('tradeActionPage.disputeAvailableWindow')}
               </p>
             )}
             <OpenDisputeDialog
@@ -1070,10 +1050,10 @@ const ActionButtons = ({
           <div className="rounded-xl border border-destructive/40 p-3 bg-destructive/10 space-y-1">
             <div className="flex items-center gap-1.5 text-xs font-bold text-destructive">
               <ShieldAlert className="h-4 w-4" />
-              <span>Official Dispute Opened</span>
+              <span>{t('tradeActionPage.officialDisputeOpened')}</span>
             </div>
             <p className="text-xs text-foreground">
-              Reason: <span className="font-semibold">{activeDispute?.reason || 'Payment or Escrow Dispute'}</span>
+              {t('tradeActionPage.reasonLabel')}: <span className="font-semibold">{activeDispute?.reason || 'Payment or Escrow Dispute'}</span>
             </p>
             {activeDispute?.explanation && (
               <p className="text-xs text-muted-foreground italic">
@@ -1088,7 +1068,7 @@ const ActionButtons = ({
 };
 
 const feedbackSchema = z.object({
-  rating: z.enum(['positive', 'negative'], { required_error: 'Please select a rating.' }),
+  rating: z.enum(['positive', 'negative'], { message: 'Please select a rating.' }),
   comment: z.string().min(1, 'Comment is required.').max(500, 'Comment cannot exceed 500 characters.')
 });
 
@@ -1113,9 +1093,8 @@ function FeedbackForm({
   counterpartId?: string;
   counterpartUsername?: string;
 }) {
-  const supabase = createClient();
   const { toast } = useToast();
-  const [isEditing, setIsEditing] = useState(false);
+  const { t, language } = useI18n();
 
   const form = useForm<FeedbackFormValues>({
     resolver: zodResolver(feedbackSchema),
@@ -1138,156 +1117,34 @@ function FeedbackForm({
 
   async function onSubmit(values: FeedbackFormValues) {
     if (!currentUserId) {
-      toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to leave feedback.' });
+      toast({ variant: 'destructive', title: t('tradeFeedbackPage.loginRequiredTitle'), description: t('tradeFeedbackPage.loginRequiredDescription') });
       return;
     }
 
     const opponentId = counterpartId || (currentUserId === (trade.buyerId || trade.buyer_id) ? (trade.sellerId || trade.seller_id) : (trade.buyerId || trade.buyer_id));
-    const publicTradeId = trade.tradeId || formatTradeId(trade.id);
 
     try {
       let savedFbRecord: any = null;
 
-      // 1. First attempt via secure API route (handles RLS bypass, profiles update, chat system message)
-      try {
-        const res = await fetch('/api/trade/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tradeId: trade.id,
-            rating: values.rating,
-            comment: values.comment,
-            counterpartId: opponentId,
-          }),
-        });
-
-        if (res.ok) {
-          const apiData = await res.json();
-          if (apiData.feedback) {
-            savedFbRecord = apiData.feedback;
-          }
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          console.warn('API feedback notice:', errData?.error);
-        }
-      } catch (apiErr) {
-        console.warn('API feedback error:', apiErr);
-      }
-
-      // 2. Fallback to direct supabase client if needed
-      if (!savedFbRecord) {
-        if (existingFeedback?.id) {
-          const { data: updatedData, error: updateErr } = await supabase
-            .from('feedback')
-            .update({
-              rating: values.rating,
-              is_positive: values.rating === 'positive',
-              comment: values.comment,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', existingFeedback.id)
-            .select()
-            .maybeSingle();
-
-          if (updateErr) {
-            // Fallback without is_positive if column not present in schema cache
-            const { data: fallbackUpdated, error: fbErr } = await supabase
-              .from('feedback')
-              .update({
-                rating: values.rating,
-                comment: values.comment,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', existingFeedback.id)
-              .select()
-              .maybeSingle();
-            if (fbErr) throw fbErr;
-            savedFbRecord = fallbackUpdated;
-          } else {
-            savedFbRecord = updatedData;
-          }
-        } else {
-          const { data: insertedData, error: insertErr } = await supabase.from('feedback').insert([
-            {
-              trade_id: trade.id,
-              from_user: currentUserId,
-              from_username: currentUsername || 'Trader',
-              to_user: opponentId,
-              rating: values.rating,
-              is_positive: values.rating === 'positive',
-              comment: values.comment,
-              created_at: new Date().toISOString()
-            }
-          ]).select().maybeSingle();
-
-          if (insertErr) {
-            // Fallback without is_positive if column not present in schema cache
-            const { data: fallbackInserted, error: fbErr } = await supabase.from('feedback').insert([
-              {
-                trade_id: trade.id,
-                from_user: currentUserId,
-                from_username: currentUsername || 'Trader',
-                to_user: opponentId,
-                rating: values.rating,
-                comment: values.comment,
-                created_at: new Date().toISOString()
-              }
-            ]).select().maybeSingle();
-            if (fbErr) throw fbErr;
-            savedFbRecord = fallbackInserted;
-          } else {
-            savedFbRecord = insertedData;
-          }
-        }
-
-        // Adjust counts in profiles table safely
-        try {
-          const { data: allFb } = await supabase
-            .from('feedback')
-            .select('rating')
-            .eq('to_user', opponentId);
-
-          if (allFb) {
-            const positiveCount = allFb.filter((f) => f.rating === 'positive' || (f as any).is_positive === true || (f as any).is_positive === 'true').length;
-            const negativeCount = allFb.filter((f) => f.rating === 'negative' || (f as any).is_positive === false || (f as any).is_positive === 'false').length;
-            const total = positiveCount + negativeCount;
-            const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
-
-            await supabase
-              .from('profiles')
-              .update({
-                positive_feedback: positiveCount,
-                negative_feedback: negativeCount,
-                feedback_score: score
-              })
-              .eq('id', opponentId);
-          }
-        } catch (profileErr) {
-          console.warn('Profiles feedback sync notice:', profileErr);
-        }
-
-        // Add official Paxones system message in trade_messages
-        await insertPaxonesSystemMessage(supabase, {
+      // Submit through the authenticated compatibility API. The handler writes
+      // only to canonical feedbacks and the database enforces completed-counterparty
+      // eligibility plus one-review-per-trade uniqueness.
+      const res = await fetch('/api/trade/feedback', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           tradeId: trade.id,
-          type: values.rating === 'positive' ? 'POSITIVE_FEEDBACK' : 'NEGATIVE_FEEDBACK',
-          openerUsername: currentUsername || 'Trader',
-          feedbackComment: values.comment
-        });
-
-        // Add notification for opponent
-        await supabase.from('notifications').insert([
-          {
-            user_id: opponentId,
-            title: 'Feedback Received',
-            message: `@${currentUsername || 'Trader'} left you ${values.rating} feedback for trade #${publicTradeId}.`,
-            type: 'feedback',
-            metadata: { link: `/trade/${trade.id}` },
-            is_read: false,
-            created_at: new Date().toISOString()
-          }
-        ]);
+          rating: values.rating,
+          comment: values.comment,
+          counterpartId: opponentId,
+        }),
+      });
+      const apiData = await res.json().catch(() => null);
+      if (!res.ok || apiData?.success !== true || !apiData.feedback) {
+        throw new Error(apiData?.error || t('tradeFeedbackPage.saveUnconfirmed'));
       }
-
+      savedFbRecord = apiData.feedback;
       const updatedFb: Feedback = {
         id: savedFbRecord?.id || existingFeedback?.id || 'fb_' + Date.now(),
         tradeId: trade.id,
@@ -1302,12 +1159,11 @@ function FeedbackForm({
       onFeedbackSaved?.(updatedFb);
 
       toast({
-        title: existingFeedback ? 'Feedback Updated' : 'Feedback Submitted',
-        description: 'Your rating and review has been recorded.'
+        title: t('tradeFeedbackPage.savedTitle'),
+        description: t('tradeFeedbackPage.savedDescription')
       });
-      setIsEditing(false);
     } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Error', description: `Failed to submit feedback: ${error.message}` });
+      toast({ variant: 'destructive', title: t('tradeFeedbackPage.failedTitle'), description: t('tradeFeedbackPage.failedDescription').replace('{error}', error.message || '') });
     }
   }
 
@@ -1321,7 +1177,7 @@ function FeedbackForm({
         <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-xs text-foreground flex items-center gap-1.5">
-              <UserCheck className="h-3.5 w-3.5 text-primary" /> Feedback Received from @{counterpartUsername || 'Partner'}
+              <UserCheck className="h-3.5 w-3.5 text-primary" /> {t('tradeFeedbackPage.receivedFrom').replace('{username}', counterpartUsername || t('tradeFeedbackPage.traderFallback'))}
             </h4>
           </div>
 
@@ -1339,10 +1195,10 @@ function FeedbackForm({
                   : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
               )}>
                 {isReceivedPositive ? <ThumbsUp className="h-3 w-3" /> : <ThumbsDown className="h-3 w-3" />}
-                {isReceivedPositive ? 'Positive Feedback' : 'Negative Feedback'}
+                {isReceivedPositive ? t('tradeFeedbackPage.positive') : t('tradeFeedbackPage.negative')}
               </span>
               <span className="text-[10px] opacity-75 font-mono">
-                {receivedFeedback.createdAt ? toDate(receivedFeedback.createdAt)?.toLocaleDateString() : 'Recorded'}
+                {receivedFeedback.createdAt ? toDate(receivedFeedback.createdAt)?.toLocaleDateString(language) : t('tradeFeedbackPage.recorded')}
               </span>
             </div>
             {receivedFeedback.comment && (
@@ -1353,20 +1209,12 @@ function FeedbackForm({
       )}
 
       {/* 2. FEEDBACK I GAVE SECTION */}
-      {existingFeedback && !isEditing ? (
+      {existingFeedback ? (
         <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-xs text-foreground flex items-center gap-1.5">
-              <ThumbsUp className="h-3.5 w-3.5 text-primary" /> Feedback I Gave
+              <ThumbsUp className="h-3.5 w-3.5 text-primary" /> {t('tradeFeedbackPage.givenByMe')}
             </h4>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsEditing(true)}
-              className="h-7 text-xs font-semibold px-2.5"
-            >
-              Edit Feedback
-            </Button>
           </div>
 
           <div className={cn(
@@ -1383,10 +1231,10 @@ function FeedbackForm({
                   : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
               )}>
                 {isPositive ? <ThumbsUp className="h-3 w-3" /> : <ThumbsDown className="h-3 w-3" />}
-                {isPositive ? 'Positive Feedback' : 'Negative Feedback'}
+                {isPositive ? t('tradeFeedbackPage.positive') : t('tradeFeedbackPage.negative')}
               </span>
               <span className="text-[10px] opacity-75 font-mono">
-                {existingFeedback.createdAt ? toDate(existingFeedback.createdAt)?.toLocaleDateString() : 'Recorded'}
+                {existingFeedback.createdAt ? toDate(existingFeedback.createdAt)?.toLocaleDateString(language) : t('tradeFeedbackPage.recorded')}
               </span>
             </div>
             {existingFeedback.comment && (
@@ -1399,19 +1247,8 @@ function FeedbackForm({
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 rounded-xl border border-border/60 p-3 bg-muted/10">
             <div className="flex items-center justify-between">
               <h4 className="font-semibold text-xs text-foreground">
-                {existingFeedback ? 'Edit Feedback You Gave' : `Leave Feedback for @${counterpartUsername || 'Partner'}`}
+                {t('tradeFeedbackPage.leaveFeedbackFor').replace('{username}', counterpartUsername || t('tradeFeedbackPage.traderFallback'))}
               </h4>
-              {existingFeedback && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsEditing(false)}
-                  className="h-6 text-[11px] px-2 text-muted-foreground"
-                >
-                  Cancel
-                </Button>
-              )}
             </div>
             <FormField
               control={form.control}
@@ -1431,7 +1268,7 @@ function FeedbackForm({
                         )}
                       >
                         <ThumbsUp className={cn("h-4 w-4", field.value === 'positive' ? "text-emerald-600 dark:text-emerald-400 fill-emerald-500/20" : "text-muted-foreground")} />
-                        <span>Positive</span>
+                        <span>{t('tradeFeedbackPage.positive')}</span>
                       </button>
 
                       <button
@@ -1445,7 +1282,7 @@ function FeedbackForm({
                         )}
                       >
                         <ThumbsDown className={cn("h-4 w-4", field.value === 'negative' ? "text-rose-600 dark:text-rose-400 fill-rose-500/20" : "text-muted-foreground")} />
-                        <span>Negative</span>
+                        <span>{t('tradeFeedbackPage.negative')}</span>
                       </button>
                     </div>
                   </FormControl>
@@ -1460,7 +1297,7 @@ function FeedbackForm({
                 <FormItem>
                   <FormControl>
                     <Textarea
-                      placeholder="Share details about your trading experience..."
+                      placeholder={t('tradeFeedbackPage.commentPlaceholder')}
                       className="text-xs min-h-[70px]"
                       {...field}
                     />
@@ -1471,7 +1308,7 @@ function FeedbackForm({
             />
             <Button type="submit" size="sm" className="w-full text-xs font-bold" disabled={isSubmitting}>
               {isSubmitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {existingFeedback ? 'Update Feedback' : 'Submit Feedback'}
+              {t('tradeFeedbackPage.submitFeedback')}
             </Button>
           </form>
         </Form>
@@ -1483,6 +1320,7 @@ function FeedbackForm({
 function AdminTradeActions({ trade, adminUserId }: { trade: Trade | any; adminUserId?: string }) {
   const supabase = createClient();
   const { toast } = useToast();
+  const { t } = useI18n();
   const [dialogState, setDialogState] = useState<{
     open: boolean;
     action: AdminActionType | null;
@@ -1504,22 +1342,29 @@ function AdminTradeActions({ trade, adminUserId }: { trade: Trade | any; adminUs
           .eq('status', 'open')
           .maybeSingle();
 
-        const dummyDispute: Dispute = dispute || {
-          id: `disp_${trade.id}`,
-          tradeId: trade.id,
-          openedBy: trade.buyerId || trade.buyer_id,
-          reason: 'Admin resolution',
-          explanation: reason,
-          status: 'open',
-          createdAt: new Date().toISOString()
-        };
+        if (!dispute?.id) {
+          throw new Error(t('tradeDetailsPage.adminFailedTitle'));
+        }
 
-        const winnerId = action === 'award_buyer' ? (trade.buyerId || trade.buyer_id) : (trade.sellerId || trade.seller_id);
-        await resolveDispute(supabase, trade, dummyDispute, winnerId, adminUserId, trade.fiatAmountInUSD || trade.fiat_amount_usd || 0);
+        const resolution = action === 'award_buyer' ? 'RELEASE' : 'CANCEL';
+        const response = await fetch('/api/admin/disputes/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            disputeId: dispute.id,
+            tradeId: trade.id,
+            resolution,
+            notes: reason
+          })
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || result?.success !== true) {
+          throw new Error(typeof result?.error === 'string' ? result.error : t('tradeDetailsPage.adminFailedTitle'));
+        }
       }
-      toast({ title: 'Admin Action Successful', description: 'The trade has been updated.' });
+      toast({ title: t('tradeDetailsPage.adminSuccessTitle'), description: t('tradeDetailsPage.adminSuccessDescription') });
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Admin Action Failed', description: e.message });
+      toast({ variant: 'destructive', title: t('tradeDetailsPage.adminFailedTitle'), description: e.message });
     } finally {
       setDialogState({ open: false, action: null });
     }
@@ -1540,29 +1385,29 @@ function AdminTradeActions({ trade, adminUserId }: { trade: Trade | any; adminUs
         <CardHeader className="py-2.5 px-3">
           <CardTitle className="flex items-center gap-1.5 text-xs text-destructive font-bold">
             <Shield className="h-4 w-4" />
-            Admin Escrow Controls
+            {t('tradeDetailsPage.adminEscrowControls')}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-1.5 p-3 pt-0">
           {tradeStatus === 'disputed' || tradeStatus === 'dispute' ? (
             <>
               <Button size="sm" variant="outline" className="text-xs" onClick={() => setDialogState({ open: true, action: 'award_buyer' })}>
-                <Gavel className="mr-1 h-3.5 w-3.5" /> Award Buyer
+                <Gavel className="mr-1 h-3.5 w-3.5" /> {t('tradeDetailsPage.awardBuyer')}
               </Button>
               <Button size="sm" variant="outline" className="text-xs" onClick={() => setDialogState({ open: true, action: 'award_seller' })}>
-                <Gavel className="mr-1 h-3.5 w-3.5" /> Award Seller
+                <Gavel className="mr-1 h-3.5 w-3.5" /> {t('tradeDetailsPage.awardSeller')}
               </Button>
             </>
           ) : (
             <>
               <Button size="sm" variant="outline" className="text-xs" onClick={() => setDialogState({ open: true, action: 'cancel' })}>
-                Cancel Trade
+                {t('tradeDetailsPage.adminCancelTrade')}
               </Button>
               <Button size="sm" variant="outline" className="text-xs" onClick={() => setDialogState({ open: true, action: 'paid' })}>
-                Mark Paid
+                {t('tradeDetailsPage.adminMarkPaid')}
               </Button>
               <Button size="sm" variant="outline" className="col-span-2 text-xs" onClick={() => setDialogState({ open: true, action: 'release' })}>
-                Release Funds
+                {t('tradeDetailsPage.adminReleaseFunds')}
               </Button>
             </>
           )}
@@ -1582,6 +1427,7 @@ export function TradeDetails({
   currentUserRole: 'buy' | 'sell';
 }) {
   const supabase = createClient();
+  const { t, language } = useI18n();
   const { timezone } = useUserTimezone();
   const isBuying = currentUserRole === 'buy';
   const tradeStatus = resolveTradeStatus(trade);
@@ -1596,8 +1442,8 @@ export function TradeDetails({
   const sellerId = trade?.seller_id || trade?.sellerId;
   const opponentId = currentUser?.id === buyerId ? sellerId : buyerId;
   const opponentUsername = isBuying
-    ? (trade?.seller?.username || trade?.seller_username || 'Seller')
-    : (trade?.buyer?.username || trade?.buyer_username || 'Buyer');
+    ? (trade?.seller?.username || trade?.seller_username || t('tradeDetailsPage.seller'))
+    : (trade?.buyer?.username || trade?.buyer_username || t('tradeDetailsPage.buyer'));
 
   useEffect(() => {
     async function loadAuthAndTradeDetails() {
@@ -1608,10 +1454,9 @@ export function TradeDetails({
         setCurrentUser(user);
 
         // Fetch existing feedback for this specific trade
-        const oppId = user.id === buyerId ? sellerId : buyerId;
         if (trade?.id) {
           try {
-            const apiRes = await fetch(`/api/trade/feedback?tradeId=${trade.id}&userId=${user.id}`);
+            const apiRes = await fetch(`/api/trade/feedback?tradeId=${trade.id}`, { credentials: 'include' });
             if (apiRes.ok) {
               const apiData = await apiRes.json();
               if (apiData?.feedback) {
@@ -1643,69 +1488,8 @@ export function TradeDetails({
             console.warn('Feedback API fetch notice:', e);
           }
 
-          // Direct supabase fallback for my feedback
-          const { data: tradeFb } = await supabase
-            .from('feedback')
-            .select('*')
-            .eq('trade_id', trade.id)
-            .eq('from_user', user.id)
-            .maybeSingle();
-
-          if (tradeFb) {
-            setExistingFeedback({
-              id: tradeFb.id,
-              tradeId: tradeFb.trade_id,
-              fromUser: tradeFb.from_user,
-              fromUsername: tradeFb.from_username,
-              toUser: tradeFb.to_user,
-              rating: tradeFb.rating,
-              comment: tradeFb.comment,
-              createdAt: tradeFb.created_at
-            });
-          } else if (oppId) {
-            const { data: fbData } = await supabase
-              .from('feedback')
-              .select('*')
-              .eq('from_user', user.id)
-              .eq('to_user', oppId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            if (fbData) {
-              setExistingFeedback({
-                id: fbData.id,
-                tradeId: fbData.trade_id,
-                fromUser: fbData.from_user,
-                fromUsername: fbData.from_username,
-                toUser: fbData.to_user,
-                rating: fbData.rating,
-                comment: fbData.comment,
-                createdAt: fbData.created_at
-              });
-            }
-          }
-
-          // Direct supabase query for feedback received on this trade
-          const { data: recFb } = await supabase
-            .from('feedback')
-            .select('*')
-            .eq('trade_id', trade.id)
-            .eq('to_user', user.id)
-            .maybeSingle();
-
-          if (recFb) {
-            setReceivedFeedback({
-              id: recFb.id,
-              tradeId: recFb.trade_id,
-              fromUser: recFb.from_user,
-              fromUsername: recFb.from_username,
-              toUser: recFb.to_user,
-              rating: recFb.rating,
-              comment: recFb.comment,
-              createdAt: recFb.created_at
-            });
-          }
+          // Feedback is loaded exclusively by the authenticated server adapter,
+          // which reads the canonical feedbacks table after verifying trade participation.
         }
 
         // Fetch dispute if any
@@ -1786,9 +1570,12 @@ export function TradeDetails({
   const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || trade?.fiat || ad?.fiat_symbol || ad?.fiat_currency || ad?.fiat || 'USD';
 
   const coinAmount = `${effectiveCryptoAmount < 0.01 && effectiveCryptoAmount > 0 ? effectiveCryptoAmount.toFixed(6) : effectiveCryptoAmount.toFixed(2)} ${coinSymbol}`;
-  const priceFormatted = effectiveRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fiatAmount = effectiveFiatAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const escrowFeeCoin = `${(effectiveCryptoAmount * 0.015).toFixed(2)} ${coinSymbol}`;
+  const priceFormatted = effectiveRate.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fiatAmount = effectiveFiatAmount.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const recordedEscrowFee = getPositiveNumber(trade?.escrow_fee, trade?.escrowFee);
+  const escrowFeeCoin = recordedEscrowFee > 0
+    ? `${recordedEscrowFee.toFixed(8)} ${coinSymbol}`
+    : t('tradeDetailsPage.notRecorded');
 
   // Offer Tag and Ad Tags extraction
   const offerLabel = (ad?.offer_label || ad?.label || ad?.offer_tag || ad?.offerTag || trade?.offer_label || trade?.label || trade?.offer_tag || trade?.offerTag || '').trim();
@@ -1816,6 +1603,14 @@ export function TradeDetails({
 
   const publicTradeId = trade?.trade_id || trade?.public_id || trade?.tradeId || formatTradeId(trade?.id);
   const badgeStatusClass = statusColors[effectiveTradeStatus as keyof typeof statusColors] || statusColors.expired;
+  const tradeStatusKeyByValue: Record<string, string> = {
+    active: 'statusActive', pending: 'statusPending', paid: 'statusPaid', buyer_marked_paid: 'statusPaid',
+    payment_sent: 'statusPaid', disputed: 'statusDisputed', dispute: 'statusDisputed', released: 'statusReleased', completed: 'statusCompleted',
+    cancelled: 'statusCancelled', canceled: 'statusCancelled', expired: 'statusExpired',
+  };
+  const displayedTradeStatus = tradeStatusKeyByValue[effectiveTradeStatus]
+    ? t('activeTrades.' + tradeStatusKeyByValue[effectiveTradeStatus])
+    : effectiveTradeStatus;
 
   // Role-Aware Dispute Resolution Outcome Calculation
   const hasDispute = Boolean(
@@ -1864,13 +1659,13 @@ export function TradeDetails({
       <CardHeader className="p-4 border-b border-border/60">
         <div className="flex justify-between items-start">
           <div>
-            <CardTitle className="text-base font-bold text-foreground">Trade Details</CardTitle>
+            <CardTitle className="text-base font-bold text-foreground">{t('tradeDetailsPage.title')}</CardTitle>
             <CardDescription className="text-xs font-mono text-muted-foreground mt-0.5">
-              Ref: {publicTradeId}
+              {t('tradeDetailsPage.ref')} {publicTradeId}
             </CardDescription>
           </div>
           <Badge variant="outline" className={cn('capitalize font-mono font-bold text-xs', badgeStatusClass)}>
-            {effectiveTradeStatus}
+            {displayedTradeStatus}
           </Badge>
         </div>
       </CardHeader>
@@ -1883,12 +1678,12 @@ export function TradeDetails({
             <div className="rounded-xl border-2 border-emerald-500/50 bg-emerald-500/15 dark:bg-emerald-950/40 p-3.5 text-xs text-emerald-950 dark:text-emerald-100 shadow-sm space-y-1">
               <div className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-300 text-sm">
                 <Trophy className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>🏆 YOU WON DISPUTE</span>
+                <span>{t('tradeDetailsPage.wonBannerTitle')}</span>
               </div>
               <p className="text-xs text-emerald-900/90 dark:text-emerald-200 leading-relaxed">
                 {isBuying
-                  ? "The moderator resolved the dispute in your favor. The escrowed crypto has been released and credited to your wallet."
-                  : "The moderator resolved the dispute in your favor. The escrowed funds have been refunded to your wallet."}
+                  ? t('tradeDetailsPage.wonBuyerMessage')
+                  : t('tradeDetailsPage.wonSellerMessage')}
               </p>
             </div>
           )}
@@ -1898,12 +1693,12 @@ export function TradeDetails({
             <div className="rounded-xl border-2 border-rose-500/50 bg-rose-500/15 dark:bg-rose-950/40 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-1">
               <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300 text-sm">
                 <XCircle className="h-4.5 w-4.5 text-rose-600 dark:text-rose-400 shrink-0" />
-                <span>❌ YOU LOST DISPUTE</span>
+                <span>{t('tradeDetailsPage.lostBannerTitle')}</span>
               </div>
               <p className="text-xs text-rose-900/90 dark:text-rose-200 leading-relaxed">
                 {isBuying
-                  ? "The moderator resolved the dispute in favor of the seller. Escrowed crypto was refunded to the seller."
-                  : "The moderator resolved the dispute in favor of the buyer. Escrowed crypto was released to the buyer."}
+                  ? t('tradeDetailsPage.lostBuyerMessage')
+                  : t('tradeDetailsPage.lostSellerMessage')}
               </p>
             </div>
           )}
@@ -1916,12 +1711,12 @@ export function TradeDetails({
                 : "bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-200"
             )}>
               <div className="font-bold flex items-center gap-1.5">
-                <span>⚠️ Payment Marked as Paid</span>
+                <span>⚠️ {t('tradeDetailsPage.paidBannerTitle')}</span>
               </div>
               <p>
                 {isBuying
-                  ? "You marked this trade as paid. Kindly wait until the seller verifies your payment and releases your trade. Do not cancel this trade."
-                  : "Buyer has marked as paid. Please check your account directly, confirm payment, and release."}
+                  ? t('tradeDetailsPage.buyerPaidMessage')
+                  : t('tradeDetailsPage.sellerPaidMessage')}
               </p>
             </div>
           )}
@@ -1929,7 +1724,7 @@ export function TradeDetails({
           {/* Main Trade Values Card */}
           <div className="space-y-2.5 rounded-xl border border-border/60 p-4 bg-muted/20">
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="font-bold text-foreground">{isBuying ? 'You are buying' : 'You are selling'}</span>
+              <span className="font-bold text-foreground">{isBuying ? t('tradeDetailsPage.buying') : t('tradeDetailsPage.selling')}</span>
               <div className="flex items-center gap-1.5">
                 <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold text-sm sm:text-base text-foreground tracking-tight">{coinAmount}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-4 w-4" />
@@ -1937,7 +1732,7 @@ export function TradeDetails({
             </div>
 
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="font-bold text-foreground">Rate</span>
+              <span className="font-bold text-foreground">{t('tradeDetailsPage.rate')}</span>
               <div className="flex items-center gap-1 text-xs sm:text-sm font-medium text-foreground">
                 <span>1 {coinSymbol} = </span>
                 <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{priceFormatted}</span>
@@ -1946,7 +1741,7 @@ export function TradeDetails({
             </div>
 
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="font-bold text-foreground">Escrow Fee (1.5%)</span>
+              <span className="font-bold text-foreground">{t('tradeDetailsPage.escrowFee')}</span>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight text-foreground">{escrowFeeCoin}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-3.5 w-3.5" />
@@ -1954,7 +1749,7 @@ export function TradeDetails({
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <span className="text-xs sm:text-sm font-semibold text-foreground">{isBuying ? 'Total to Pay' : 'Total to Receive'}</span>
+              <span className="text-xs sm:text-sm font-semibold text-foreground">{isBuying ? t('tradeDetailsPage.totalToPay') : t('tradeDetailsPage.totalToReceive')}</span>
               <div className="flex items-baseline gap-1 text-emerald-600 dark:text-emerald-400">
                 <span className="text-base sm:text-xl font-bold font-[Arial,Helvetica,sans-serif] tabular-nums tracking-tight">
                   {fiatAmount}
@@ -1975,7 +1770,7 @@ export function TradeDetails({
                   className="text-[11px] font-bold gap-1 px-2.5 py-1 bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/30"
                 >
                   <Tag className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                  <span>Offer Tag: {offerLabel}</span>
+                  <span>{t('tradeDetailsPage.offerTagLabel')}: {offerLabel}</span>
                 </Badge>
               )}
               {adTags.map((tag, idx) => (
@@ -1984,7 +1779,7 @@ export function TradeDetails({
                   variant="outline"
                   className="text-[11px] font-medium gap-1 px-2 py-0.5 bg-muted/40 text-muted-foreground border-border/60"
                 >
-                  <span>Ad Tag: #{tag}</span>
+                  <span>{t('tradeDetailsPage.adTag')}: #{tag}</span>
                 </Badge>
               ))}
             </div>
@@ -1995,23 +1790,23 @@ export function TradeDetails({
             <div className="p-3.5 rounded-xl border-2 border-rose-500/40 bg-rose-500/10 text-rose-950 dark:text-rose-100 space-y-2 shadow-xs">
               <div className="flex items-center gap-1.5 font-bold text-rose-700 dark:text-rose-400 text-xs sm:text-sm">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
-                <span>Trade Expired</span>
+                <span>{t('tradeDetailsPage.tradeExpired')}</span>
               </div>
               <p className="text-xs font-semibold leading-relaxed text-rose-900 dark:text-rose-200">
-                This trade is expired, <strong>don&apos;t make payment</strong>. Crypto is no longer held in escrow.
+                {t('tradeDetailsPage.expiredWarning')}
               </p>
               <p className="text-xs text-rose-800/90 dark:text-rose-300/90 leading-relaxed">
-                If you make payment, <strong>open trade again</strong> or <strong>contact support</strong>.
+                {t('tradeDetailsPage.expiredSupportMessage')}
               </p>
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <Button asChild size="sm" variant="default" className="text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold">
                   <Link href={`/ad/${publicAdDisplayId || ad?.id || trade?.ad_id || trade?.adId}`}>
-                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Open Trade Again
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> {t('tradeDetailsPage.reopenTrade')}
                   </Link>
                 </Button>
                 <Button asChild size="sm" variant="outline" className="text-xs border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-500/10">
                   <Link href="/support">
-                    Contact Support
+                    {t('tradeDetailsPage.contactSupport')}
                   </Link>
                 </Button>
               </div>
@@ -2023,10 +1818,10 @@ export function TradeDetails({
             <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-200 text-xs space-y-1.5 shadow-xs">
               <div className="flex items-center gap-1.5 font-bold text-blue-700 dark:text-blue-300">
                 <Shield className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                <span>Important Buyer Safety Rule</span>
+                <span>{t('tradeDetailsPage.buyerSafetyTitle')}</span>
               </div>
               <p className="leading-relaxed">
-                After making the payment, <strong>don&apos;t forget to click &quot;I Have Paid&quot;</strong> before the timer expires. Otherwise, this trade will be automatically cancelled by the system to protect both parties.
+                {t('tradeDetailsPage.buyerSafetyMessage')}
               </p>
             </div>
           )}
@@ -2051,7 +1846,7 @@ export function TradeDetails({
             <div className="flex items-center justify-between p-3.5 rounded-xl border-2 border-amber-500/50 dark:border-amber-400/60 bg-amber-500/15 dark:bg-slate-900/90 text-amber-950 dark:text-amber-100 shadow-sm">
               <div className="flex items-center gap-2">
                 <Clock className="h-4.5 w-4.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-200">Payment Countdown:</span>
+                <span className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-200">{t('tradeDetailsPage.paymentCountdown')}</span>
               </div>
               <span className="font-mono font-extrabold text-amber-600 dark:text-amber-400 text-sm sm:text-base tabular-nums tracking-wider px-2 py-0.5 rounded-md bg-amber-500/10 dark:bg-amber-400/10 border border-amber-500/30 dark:border-amber-400/30">
                 {`${String(paymentTimeRemaining.hours).padStart(2, '0')}:${String(paymentTimeRemaining.minutes).padStart(2, '0')}:${String(paymentTimeRemaining.seconds).padStart(2, '0')}`}
@@ -2072,30 +1867,30 @@ export function TradeDetails({
           {/* Participants with Usernames */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
             <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
-              Participants & Payment
+              {t('tradeDetailsPage.participantsPayment')}
             </h4>
             <ParticipantRow
-              label="Buyer"
+              label={t('tradeDetailsPage.buyer')}
               userId={buyerId}
               fallbackUsername={trade?.buyer?.username || trade?.buyer_username}
             />
             <ParticipantRow
-              label="Seller"
+              label={t('tradeDetailsPage.seller')}
               userId={sellerId}
               fallbackUsername={trade?.seller?.username || trade?.seller_username}
             />
             {(trade?.paymentMethod || trade?.payment_method) && (
-              <DetailRow label="Payment Method" value={trade.paymentMethod || trade.payment_method} />
+              <DetailRow label={t('tradeDetailsPage.paymentMethod')} value={trade.paymentMethod || trade.payment_method} />
             )}
           </div>
 
           {/* Timestamps in User Timezone with GMT hover tooltip */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
             <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
-              Timeline
+              {t('tradeDetailsPage.timeline')}
             </h4>
             <DetailRow
-              label="Created"
+              label={t('tradeDetailsPage.created')}
               boldLabel
               value={
                 <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade?.createdAt || trade?.created_at)}>
@@ -2105,7 +1900,7 @@ export function TradeDetails({
             />
             {(trade?.paidAt || trade?.paid_at) && (
               <DetailRow
-                label="Marked Paid"
+                label={t('tradeDetailsPage.markedPaid')}
                 boldLabel
                 value={
                   <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade.paidAt || trade.paid_at)}>
@@ -2116,7 +1911,7 @@ export function TradeDetails({
             )}
             {(trade?.releasedAt || trade?.released_at) && (
               <DetailRow
-                label="Released"
+                label={t('tradeDetailsPage.released')}
                 boldLabel
                 value={
                   <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade.releasedAt || trade.released_at)}>
@@ -2127,7 +1922,7 @@ export function TradeDetails({
             )}
             {(isExpired || tradeStatus === 'expired') && (
               <DetailRow
-                label="Expired"
+                label={t('tradeDetailsPage.expired')}
                 boldLabel
                 value={
                   <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-rose-600 dark:text-rose-400" title={formatUtcDateTime(trade?.expires_at || dynamicExpiresDate)}>
@@ -2141,44 +1936,44 @@ export function TradeDetails({
           {isDisputeResolved && (
             <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
               <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
-                Dispute Resolution
+                {t('tradeDetailsPage.disputeResolution')}
               </h4>
               <DetailRow
-                label="Awarded To"
+                label={t('tradeDetailsPage.awardedTo')}
                 boldLabel
-                value={resolvedWinnerId === buyerId ? 'Buyer' : 'Seller'}
+                value={resolvedWinnerId === buyerId ? t('tradeDetailsPage.buyer') : t('tradeDetailsPage.seller')}
                 valueClass="font-bold text-primary"
               />
               <DetailRow
-                label="Your Result"
+                label={t('tradeDetailsPage.yourResult')}
                 boldLabel
                 value={
                   isUserWinner ? (
                     <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <Trophy className="h-3.5 w-3.5" /> Won Dispute
+                      <Trophy className="h-3.5 w-3.5" /> {t('tradeDetailsPage.wonDispute')}
                     </span>
                   ) : isUserLoser ? (
                     <span className="font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                      <XCircle className="h-3.5 w-3.5" /> Lost Dispute
+                      <XCircle className="h-3.5 w-3.5" /> {t('tradeDetailsPage.lostDispute')}
                     </span>
                   ) : (
-                    <span className="capitalize">{resolvedWinnerId === buyerId ? 'Awarded to Buyer' : 'Awarded to Seller'}</span>
+                    <span className="capitalize">{resolvedWinnerId === buyerId ? t('tradeDetailsPage.awardedToBuyer') : t('tradeDetailsPage.awardedToSeller')}</span>
                   )
                 }
               />
               <DetailRow
-                label="Outcome"
-                value={<span className="capitalize">{effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed' ? 'Released to Buyer' : 'Returned to Seller'}</span>}
+                label={t('tradeDetailsPage.outcome')}
+                value={<span className="capitalize">{effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed' ? t('tradeDetailsPage.releasedToBuyer') : t('tradeDetailsPage.returnedToSeller')}</span>}
               />
               {(resolvedDispute?.resolution_reason || resolvedDispute?.resolution_note || resolvedDispute?.resolution) && (
                 <DetailRow
-                  label="Decision Notes"
+                  label={t('tradeDetailsPage.decisionNotes')}
                   value={resolvedDispute.resolution_reason || resolvedDispute.resolution_note || resolvedDispute.resolution}
                 />
               )}
               {(resolvedDispute?.resolved_at || resolvedDispute?.resolvedAt) && (
                 <DetailRow
-                  label="Resolved At"
+                  label={t('tradeDetailsPage.resolvedAt')}
                   boldLabel
                   value={
                     <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(resolvedDispute.resolved_at || resolvedDispute.resolvedAt)}>
@@ -2193,11 +1988,11 @@ export function TradeDetails({
           {/* Ad Reference & Offer Terms */}
           <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
             <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-1">
-              Offer Terms &amp; Ad Info
+              {t('tradeDetailsPage.offerTermsAdInfo')}
             </h4>
             {publicAdDisplayId ? (
               <DetailRow
-                label="Ad ID"
+                label={t('tradeDetailsPage.adId')}
                 boldLabel
                 value={`#${publicAdDisplayId}`}
                 isLink={true}
@@ -2205,7 +2000,7 @@ export function TradeDetails({
               />
             ) : (
               <DetailRow
-                label="Ad ID"
+                label={t('tradeDetailsPage.adId')}
                 boldLabel
                 value="—"
                 isLink={false}
@@ -2213,7 +2008,7 @@ export function TradeDetails({
             )}
             {offerLabel && (
               <DetailRow
-                label="Offer Tag"
+                label={t('tradeDetailsPage.offerTag')}
                 boldLabel
                 value={
                   <Badge variant="secondary" className="text-[11px] font-bold px-2 py-0.5 bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/30">
@@ -2224,7 +2019,7 @@ export function TradeDetails({
             )}
             {adTags && adTags.length > 0 && (
               <DetailRow
-                label="Ad Tags"
+                label={t('tradeDetailsPage.adTags')}
                 boldLabel
                 value={
                   <div className="flex flex-wrap gap-1">
@@ -2240,10 +2035,10 @@ export function TradeDetails({
             <div className="pt-1 border-t border-border/40">
               <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-primary" />
-                <span>Seller Terms &amp; Instructions:</span>
+                <span>{t('tradeDetailsPage.sellerTermsLabel')}</span>
               </p>
               <div className="text-xs p-3 bg-muted/40 dark:bg-muted/20 rounded-xl text-foreground whitespace-pre-wrap leading-relaxed border border-border/40">
-                {sellerOfferTerms || "No special conditions specified by seller. Standard Paxones Escrow rules apply."}
+                {sellerOfferTerms || t('tradeDetailsPage.sellerTermsFallback')}
               </div>
             </div>
           </div>
@@ -2252,7 +2047,7 @@ export function TradeDetails({
           {showReopen && (
             <Button asChild variant="outline" className="w-full text-xs font-bold">
               <Link href={`/ad/${trade.adId || trade.ad_id || publicAdDisplayId}`}>
-                <RefreshCw className="mr-2 h-4 w-4" /> Start New Trade With Offer
+                <RefreshCw className="mr-2 h-4 w-4" /> {t('tradeDetailsPage.reopenTrade')}
               </Link>
             </Button>
           )}

@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.initiate_p2p_trade(uuid, uuid, uuid, numeric, text, numeric, numeric, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.initiate_p2p_trade(uuid, uuid, uuid, numeric, text, numeric, numeric, text, text) TO service_role;

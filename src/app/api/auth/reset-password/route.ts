@@ -1,138 +1,198 @@
 import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
-import crypto from 'crypto';
+import { hashSecurityAnswer, verifySecurityAnswer } from '@/lib/security-answer';
+
+export const dynamic = 'force-dynamic';
+
+const MAX_RESET_BODY_BYTES = 16 * 1024;
+
+async function readBoundedBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_RESET_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { password, securityQuestion, securityAnswer } = body;
-
-    if (!password || password.length < 8) {
-      return NextResponse.json(
-        { error: 'Password must be at least 8 characters long.' },
-        { status: 400 }
-      );
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESET_BODY_BYTES) {
+      return NextResponse.json({ error: 'Password reset request is too large.' }, { status: 413 });
     }
 
-    if (!securityAnswer || !securityAnswer.trim()) {
-      return NextResponse.json(
-        { error: 'Please provide the answer to your security question.' },
-        { status: 400 }
-      );
+    const rawBody = await readBoundedBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Password reset request is too large.' }, { status: 413 });
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Malformed password reset request.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid password reset request.' }, { status: 400 });
+    }
+
+    const { password, securityQuestion, securityAnswer } = body as Record<string, unknown>;
+    if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+      return NextResponse.json({ error: 'Password must contain between 8 and 128 characters.' }, { status: 400 });
+    }
+    if (typeof securityAnswer !== 'string' || securityAnswer.trim().length < 1 || securityAnswer.length > 512) {
+      return NextResponse.json({ error: 'Please provide your security answer.' }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
-    let authUser: any = null;
+    let authUser: { id: string; email?: string } | null = null;
 
-    // 1. Try resolving user from request auth cookies
-    try {
-      const supabaseServer = await createClient();
-      const { data: { user } } = await supabaseServer.auth.getUser();
-      if (user) {
-        authUser = user;
-      }
-    } catch (e) {
-      console.warn('[RESET_PASSWORD] Cookie auth lookup failed, checking authorization header');
+    const supabaseServer = await createClient();
+    const { data: cookieAuth, error: cookieAuthError } = await supabaseServer.auth.getUser();
+    if (!cookieAuthError && cookieAuth.user) {
+      authUser = { id: cookieAuth.user.id, email: cookieAuth.user.email };
     }
 
-    // 2. If cookie user is not present, check Authorization Bearer header
     if (!authUser) {
-      const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.replace('Bearer ', '').trim();
+      const authHeader = req.headers.get('authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7).trim();
         if (token) {
-          const { data: { user }, error: tokenErr } = await admin.auth.getUser(token);
-          if (!tokenErr && user) {
-            authUser = user;
-          }
+          const { data, error } = await admin.auth.getUser(token);
+          if (!error && data.user) authUser = { id: data.user.id, email: data.user.email };
         }
       }
     }
 
     if (!authUser) {
       return NextResponse.json(
-        { error: 'Auth session missing or recovery link expired. Please request a new password recovery link.' },
+        { error: 'Recovery session missing or expired. Request a new password reset link.' },
         { status: 401 }
       );
     }
 
-    // 3. Verify security question and answer against profile in database
-    const { data: profile, error: profileErr } = await admin
+    const { data: profile, error: profileError } = await admin
       .from('profiles')
-      .select('id, email, username, security_question, security_answer, security_answer_hash')
+      .select('id, security_question, security_answer, security_answer_hash')
       .eq('id', authUser.id)
       .maybeSingle();
 
-    if (profileErr) {
-      console.error('[RESET_PASSWORD] Profile query error:', profileErr);
+    if (profileError || !profile) {
+      console.error('[RESET PASSWORD] Profile lookup failed', { code: profileError?.code || null });
+      return NextResponse.json({ error: 'Unable to verify your account security details.' }, { status: 503 });
     }
 
-    const cleanInputAnswer = securityAnswer.trim().toLowerCase();
-    const sha256Input = crypto.createHash('sha256').update(cleanInputAnswer).digest('hex');
-    const base64Input = Buffer.from(cleanInputAnswer).toString('base64');
+    const hasConfiguredAnswer = Boolean(profile.security_answer_hash || profile.security_answer);
+    let nextSecurityHash: string | null = null;
 
-    if (profile && (profile.security_answer || profile.security_answer_hash)) {
-      const cleanStoredAnswer = (profile.security_answer || '').trim().toLowerCase();
-      const storedHash = (profile.security_answer_hash || '').trim();
+    if (hasConfiguredAnswer) {
+      const verification = await verifySecurityAnswer(
+        securityAnswer,
+        profile.security_answer_hash,
+        profile.security_answer
+      );
+      if (!verification.valid) {
+        return NextResponse.json({
+          error: 'The security answer provided is incorrect. Please verify and try again.',
+          question: profile.security_question,
+        }, { status: 400 });
+      }
 
-      const isMatch =
-        (cleanStoredAnswer && cleanStoredAnswer === cleanInputAnswer) ||
-        (storedHash && (storedHash === sha256Input || storedHash === base64Input));
-
-      if (!isMatch) {
-        return NextResponse.json(
-          {
-            error: 'The security answer provided is incorrect. Please verify and try again.',
-            question: profile.security_question,
-          },
-          { status: 400 }
-        );
+      if (verification.needsRehash) {
+        nextSecurityHash = await hashSecurityAnswer(securityAnswer);
       }
     } else {
-      // If profile does not have security question configured, save the chosen security question
-      if (profile && securityQuestion) {
-        await admin
-          .from('profiles')
-          .update({
-            security_question: securityQuestion.trim(),
-            security_answer: cleanInputAnswer,
-            security_answer_hash: sha256Input,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', authUser.id);
+      if (
+        typeof securityQuestion !== 'string' ||
+        securityQuestion.trim().length < 5 ||
+        securityQuestion.trim().length > 200
+      ) {
+        return NextResponse.json({
+          error: 'Set a valid security question to complete your account recovery.',
+        }, { status: 400 });
+      }
+      nextSecurityHash = await hashSecurityAnswer(securityAnswer);
+    }
+
+    // Record the withdrawal security hold before changing the Auth password.
+    // If Auth rejects the password update, the conservative hold remains rather
+    // than allowing a successful password change without its required hold.
+    const now = new Date().toISOString();
+    const profileUpdate: Record<string, unknown> = {
+      password_changed_at: now,
+      updated_at: now,
+    };
+    if (nextSecurityHash) {
+      profileUpdate.security_answer_hash = nextSecurityHash;
+      profileUpdate.security_answer = null;
+      if (!hasConfiguredAnswer && typeof securityQuestion === 'string') {
+        profileUpdate.security_question = securityQuestion.trim();
       }
     }
 
-    // 4. Update the user password in Supabase Auth via Admin client
-    const { error: updateErr } = await admin.auth.admin.updateUserById(authUser.id, {
-      password: password,
+    const { data: updatedRows, error: profileUpdateError } = await admin
+      .from('profiles')
+      .update(profileUpdate)
+      .eq('id', authUser.id)
+      .select('id');
+
+    if (profileUpdateError || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+      console.error('[RESET PASSWORD] Could not persist security state and withdrawal hold', {
+        code: profileUpdateError?.code || null,
+        rows: Array.isArray(updatedRows) ? updatedRows.length : null,
+      });
+      return NextResponse.json({ error: 'Could not safely complete password recovery. Please retry or contact support.' }, { status: 503 });
+    }
+
+    const { error: passwordUpdateError } = await admin.auth.admin.updateUserById(authUser.id, {
+      password,
     });
 
-    if (updateErr) {
-      console.error('[RESET_PASSWORD] Password update error:', updateErr);
+    if (passwordUpdateError) {
+      console.error('[RESET PASSWORD] Auth password update failed', {
+        code: passwordUpdateError.code || null,
+      });
       return NextResponse.json(
-        { error: updateErr.message || 'Failed to update password.' },
+        { error: 'Password update failed. Your account remains protected by a temporary withdrawal security hold.' },
         { status: 400 }
       );
     }
 
-    // Atomically record password change timestamp for withdrawal security hold
-    await admin
-      .from('profiles')
-      .update({
-        password_changed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', authUser.id);
-
     return NextResponse.json({
       success: true,
       message: 'Password updated successfully. You can now log in with your new credentials.',
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
-  } catch (err: any) {
-    console.error('[RESET_PASSWORD] Unexpected error:', err);
+  } catch (error) {
+    console.error('[RESET PASSWORD] Request failed', {
+      error: error instanceof Error ? error.name : 'UnknownError',
+    });
     return NextResponse.json(
-      { error: err.message || 'Internal server error while resetting password.' },
+      { error: 'Could not safely complete password recovery. Please retry.' },
       { status: 500 }
     );
   }

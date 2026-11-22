@@ -1,0 +1,896 @@
+﻿{
+    "generated_utc":  "2026-10-31T10:02:54.9345992Z",
+    "repository":  "tkishanmkm/cleanp2p",
+    "production_project":  "eaiwgfxoiwxepinvcykg",
+    "production_ledger_count":  81,
+    "git_history_unique_migration_paths":  249,
+    "matched_live_names":  71,
+    "matched_names_with_pre_deploy_commit":  33,
+    "candidate_rows":  [
+                           {
+                               "production_version":  "20261011152650",
+                               "production_name":  "wallet_rpc_execute_restrictions",
+                               "source_path":  "supabase/migrations/20261011000000_wallet_rpc_execute_restrictions.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "e4b7ea94d0c2a55d4c674d453bc717e015dd21c2",
+                                                        "date":  "2026-10-11T15:28:03.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011152650",
+                               "production_name":  "wallet_rpc_execute_restrictions",
+                               "source_path":  "supabase/migrations/20261011152650_wallet_rpc_execute_restrictions.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "d27078952dd702937162fdbd2a3e05493c5d32d2",
+                                                        "date":  "2026-10-11T15:29:28.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011160153",
+                               "production_name":  "wallet_hardening_followup",
+                               "source_path":  "supabase/migrations/20261011170000_wallet_hardening_followup.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "b64609206f1c920e6bd1a588cc1ed02ea219eada",
+                                                            "date":  "2026-10-11T16:01:47.0000000Z",
+                                                            "blob":  "dcc442887a50cb4c2fbfe44d3f3f075a79f83fc1",
+                                                            "bytes":  1100
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "b64609206f1c920e6bd1a588cc1ed02ea219eada",
+                                                        "date":  "2026-10-11T16:01:47.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011160335",
+                               "production_name":  "wallet_deposit_rpc_restrictions",
+                               "source_path":  "supabase/migrations/20261011171000_wallet_deposit_rpc_restrictions.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "9b22d39a9ca6c069479d1fc98bb503793354c66e",
+                                                            "date":  "2026-10-11T16:03:31.0000000Z",
+                                                            "blob":  "d12974fa4521d3334bc4208324b343636a081583",
+                                                            "bytes":  2579
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "9b22d39a9ca6c069479d1fc98bb503793354c66e",
+                                                        "date":  "2026-10-11T16:03:31.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011160457",
+                               "production_name":  "wallet_legacy_deposit_overload",
+                               "source_path":  "supabase/migrations/20261011172000_wallet_legacy_deposit_overload.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "8c6af9025087b0e09b66257a91a97e8ce5252d4e",
+                                                            "date":  "2026-10-11T16:04:54.0000000Z",
+                                                            "blob":  "e3b56fe02cb5f146811bfaad7cb4e9dd06385aea",
+                                                            "bytes":  346
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "8c6af9025087b0e09b66257a91a97e8ce5252d4e",
+                                                        "date":  "2026-10-11T16:04:54.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011161643",
+                               "production_name":  "secure_wallet_provisioning_trigger",
+                               "source_path":  "supabase/migrations/20261011173000_secure_wallet_provisioning_trigger.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "c414cb33c6a2df51b6a8929413da72f66d52498b",
+                                                            "date":  "2026-10-11T16:16:39.0000000Z",
+                                                            "blob":  "112df79b2b0568d56f643801978df7eb124a3db7",
+                                                            "bytes":  1155
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "c414cb33c6a2df51b6a8929413da72f66d52498b",
+                                                        "date":  "2026-10-11T16:16:39.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011161817",
+                               "production_name":  "enforce_atomic_withdrawal_limits",
+                               "source_path":  "supabase/migrations/20261011174000_enforce_atomic_withdrawal_limits.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "0a652b8e04c0029977c87714a0d232fd00cfce3b",
+                                                            "date":  "2026-10-11T16:18:13.0000000Z",
+                                                            "blob":  "5ee921d4444adfd842a8c41b2962306a48882867",
+                                                            "bytes":  4103
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "0a652b8e04c0029977c87714a0d232fd00cfce3b",
+                                                        "date":  "2026-10-11T16:18:13.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011163228",
+                               "production_name":  "restrict_wallet_lock_functions",
+                               "source_path":  "supabase/migrations/20261011175000_restrict_wallet_lock_functions.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "68af546acca47b0edbae7b3a1034c9f0cf521d0e",
+                                                            "date":  "2026-10-11T16:32:18.0000000Z",
+                                                            "blob":  "10e0bba7e341048f7dcd11c348f8a995c491516a",
+                                                            "bytes":  900
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "68af546acca47b0edbae7b3a1034c9f0cf521d0e",
+                                                        "date":  "2026-10-11T16:32:18.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261011163807",
+                               "production_name":  "fix_wallet_transfer_search_path",
+                               "source_path":  "supabase/migrations/20261011164000_fix_wallet_transfer_search_path.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "d11c20f5b6efbcdeef53ca959bb75d4472f379c9",
+                                                        "date":  "2026-10-11T16:38:13.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261013231919",
+                               "production_name":  "revoke_unverified_legacy_deposit_credit_rpcs",
+                               "source_path":  "supabase/migrations/20261014000000_revoke_unverified_legacy_deposit_credit_rpcs.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "4ac6e0d7d06606f2330340916f4472d94bc0949f",
+                                                        "date":  "2026-10-13T23:19:30.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261013232410",
+                               "production_name":  "revoke_unverified_process_confirmed_deposit",
+                               "source_path":  "supabase/migrations/20261014010000_revoke_unverified_process_confirmed_deposit.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "b22d2e446604f0583e87d4cda5cb57a217ffc3c4",
+                                                            "date":  "2026-10-13T23:24:01.0000000Z",
+                                                            "blob":  "e367f13656df5e0bc68f71010001cc7187c10272",
+                                                            "bytes":  386
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "b22d2e446604f0583e87d4cda5cb57a217ffc3c4",
+                                                        "date":  "2026-10-13T23:24:01.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261014032736",
+                               "production_name":  "harden_process_deposit_atomic_existing_identity",
+                               "source_path":  "supabase/migrations/20261014040000_harden_process_deposit_atomic_existing_identity.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "1904ae688bfb421f1d593f6bd9bde448a7e9033f",
+                                                        "date":  "2026-10-14T03:27:58.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015075956",
+                               "production_name":  "ads_owner_insert_policy",
+                               "source_path":  "supabase/migrations/20261015000200_ads_owner_insert_policy.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "f7383b9b2aad0d1b427f1974ed1b0f3463066bca",
+                                                            "date":  "2026-10-15T07:59:50.0000000Z",
+                                                            "blob":  "116e16c0ee7f5f8c1af3cdc4b31a18e4ac814249",
+                                                            "bytes":  356
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "f7383b9b2aad0d1b427f1974ed1b0f3463066bca",
+                                                        "date":  "2026-10-15T07:59:50.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015080244",
+                               "production_name":  "revoke_unattached_p2p_ads_trigger_function",
+                               "source_path":  "supabase/migrations/20261015000300_revoke_unattached_p2p_ads_trigger_function.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "129b4885143a34bc039fb26265b0bc2cd12d92e0",
+                                                            "date":  "2026-10-15T08:02:38.0000000Z",
+                                                            "blob":  "a472eabddf80ad8d05f5b4d7cfbc1d3e466d7726",
+                                                            "bytes":  254
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "129b4885143a34bc039fb26265b0bc2cd12d92e0",
+                                                        "date":  "2026-10-15T08:02:38.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015080421",
+                               "production_name":  "restrict_privileged_trade_rpcs",
+                               "source_path":  "supabase/migrations/20261015000400_restrict_privileged_trade_rpcs.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "76a70eab635503f82c1494df25dd42f8a8a384c5",
+                                                            "date":  "2026-10-15T08:04:14.0000000Z",
+                                                            "blob":  "088871f88a0221e688d8d713984620f6cb79c00e",
+                                                            "bytes":  795
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "76a70eab635503f82c1494df25dd42f8a8a384c5",
+                                                        "date":  "2026-10-15T08:04:14.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015080715",
+                               "production_name":  "repair_trade_expiry_accounting",
+                               "source_path":  "supabase/migrations/20261015000500_repair_trade_expiry_accounting.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "c9fb7991b3b7791add5cfb2a6bc14f770def1e94",
+                                                            "date":  "2026-10-15T08:07:08.0000000Z",
+                                                            "blob":  "c5c830289e9b68c75decf3d4b74ee42dad9fba43",
+                                                            "bytes":  5097
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "c9fb7991b3b7791add5cfb2a6bc14f770def1e94",
+                                                        "date":  "2026-10-15T08:07:08.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015080904",
+                               "production_name":  "fail_closed_duplicate_wallet_assets",
+                               "source_path":  "supabase/migrations/20261015000600_fail_closed_duplicate_wallet_assets.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "8d80133762877eb2d0d29b4fbc1c3985e89336fe",
+                                                            "date":  "2026-10-15T08:08:58.0000000Z",
+                                                            "blob":  "92651b9cfa669e4761343dca13381d62e9b05945",
+                                                            "bytes":  5586
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "8d80133762877eb2d0d29b4fbc1c3985e89336fe",
+                                                        "date":  "2026-10-15T08:08:58.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081007",
+                               "production_name":  "delegate_expired_trade_cancellation",
+                               "source_path":  "supabase/migrations/20261015000700_delegate_expired_trade_cancellation.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "83387b0a88d70cc57e75af50e848b5643c3c1d74",
+                                                            "date":  "2026-10-15T08:10:01.0000000Z",
+                                                            "blob":  "8b53572dc1752ad323e8e78b1e3044f046112b94",
+                                                            "bytes":  771
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "83387b0a88d70cc57e75af50e848b5643c3c1d74",
+                                                        "date":  "2026-10-15T08:10:01.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081159",
+                               "production_name":  "fail_closed_missing_trade_asset",
+                               "source_path":  "supabase/migrations/20261015000800_fail_closed_missing_trade_asset.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "7afd1093770d9c22f0e8b8c696c399b1c2347b34",
+                                                            "date":  "2026-10-15T08:11:47.0000000Z",
+                                                            "blob":  "ef771f16ebf9f70bf1ab826d7d41c96dc3ed09dd",
+                                                            "bytes":  4946
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "7afd1093770d9c22f0e8b8c696c399b1c2347b34",
+                                                        "date":  "2026-10-15T08:11:47.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081306",
+                               "production_name":  "idempotent_trade_expiry_refunds",
+                               "source_path":  "supabase/migrations/20261015000900_idempotent_trade_expiry_refunds.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "005289522390cf153aaf8bc201a7f56e78e9357c",
+                                                            "date":  "2026-10-15T08:13:01.0000000Z",
+                                                            "blob":  "e188d1c81a88fe255d5daa0f7887ce2e96d5fbfd",
+                                                            "bytes":  396
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "005289522390cf153aaf8bc201a7f56e78e9357c",
+                                                        "date":  "2026-10-15T08:13:01.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081431",
+                               "production_name":  "restrict_legacy_trade_cancellation",
+                               "source_path":  "supabase/migrations/20261015001000_restrict_legacy_trade_cancellation.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "5b5d6c75f73e36335ac3b1eedb646db40fbaf6aa",
+                                                            "date":  "2026-10-15T08:14:25.0000000Z",
+                                                            "blob":  "a6cadd2a9b68c4505820399345fcb1ddc38a6109",
+                                                            "bytes":  483
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "5b5d6c75f73e36335ac3b1eedb646db40fbaf6aa",
+                                                        "date":  "2026-10-15T08:14:25.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081602",
+                               "production_name":  "remove_user_metadata_admin_trust_from_trade_cancel",
+                               "source_path":  "supabase/migrations/20261015001100_remove_user_metadata_admin_trust_from_trade_cancel.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "5700fb1b6249fea51e97e40a235eb7a568e2876b",
+                                                            "date":  "2026-10-15T08:15:53.0000000Z",
+                                                            "blob":  "05d5afb7575c81c425dd03ea5286a2448e86399e",
+                                                            "bytes":  1090
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "5700fb1b6249fea51e97e40a235eb7a568e2876b",
+                                                        "date":  "2026-10-15T08:15:53.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081635",
+                               "production_name":  "remove_user_metadata_admin_trust_from_escrow_release",
+                               "source_path":  "supabase/migrations/20261015001200_remove_user_metadata_admin_trust_from_escrow_release.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "4c8eb7a1601bb22a3c977964ed2bd244a94838ef",
+                                                            "date":  "2026-10-15T08:16:27.0000000Z",
+                                                            "blob":  "90de0a9c5ad65f0ab58024276425ab034e45abe0",
+                                                            "bytes":  997
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "4c8eb7a1601bb22a3c977964ed2bd244a94838ef",
+                                                        "date":  "2026-10-15T08:16:27.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015081753",
+                               "production_name":  "unique_trade_settlement_ledger_refs",
+                               "source_path":  "supabase/migrations/20261015001300_unique_trade_settlement_ledger_refs.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "23c2ba6c172971e0ec8d6c907784162670125606",
+                                                            "date":  "2026-10-15T08:17:47.0000000Z",
+                                                            "blob":  "d38958d6f86f33bcb9474d9f0f425820aefa8ec5",
+                                                            "bytes":  580
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "23c2ba6c172971e0ec8d6c907784162670125606",
+                                                        "date":  "2026-10-15T08:17:47.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015082919",
+                               "production_name":  "harden_legacy_process_trade_escrow_search_path",
+                               "source_path":  "supabase/migrations/20261015081840_harden_legacy_process_trade_escrow_search_path.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "72e86430f109145a543127401537af3889d29743",
+                                                            "date":  "2026-10-15T08:29:12.0000000Z",
+                                                            "blob":  "6b56025d148a762d73e6b5a38c5b9b269492b80d",
+                                                            "bytes":  276
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "72e86430f109145a543127401537af3889d29743",
+                                                        "date":  "2026-10-15T08:29:12.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015083653",
+                               "production_name":  "harden_kyc_initiation_authorization",
+                               "source_path":  "supabase/migrations/20261015090000_harden_kyc_initiation_authorization.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "16da4e68c57909685c29454be5ea0ec0463d73be",
+                                                            "date":  "2026-10-15T08:36:33.0000000Z",
+                                                            "blob":  "345e89fb8d29351ef176c4872739bbe1437681b1",
+                                                            "bytes":  3632
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "16da4e68c57909685c29454be5ea0ec0463d73be",
+                                                        "date":  "2026-10-15T08:36:33.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084029",
+                               "production_name":  "restrict_direct_trade_trigger_function_execution",
+                               "source_path":  "supabase/migrations/20261015091000_restrict_direct_trade_trigger_function_execution.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "9b727017ba776481c8de1ae761b8e1e37fd25455",
+                                                            "date":  "2026-10-15T08:40:24.0000000Z",
+                                                            "blob":  "91a2ef875c142a947aa6a478cfc2956574e0658f",
+                                                            "bytes":  454
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "9b727017ba776481c8de1ae761b8e1e37fd25455",
+                                                        "date":  "2026-10-15T08:40:24.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084120",
+                               "production_name":  "restrict_hd_wallet_index_rpc",
+                               "source_path":  "supabase/migrations/20261015092000_restrict_hd_wallet_index_rpc.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "62d1296437be488bf7741149c2f167b3b2253b08",
+                                                            "date":  "2026-10-15T08:41:15.0000000Z",
+                                                            "blob":  "fd64326061d6c267c21e26803696f905dee1c373",
+                                                            "bytes":  271
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "62d1296437be488bf7741149c2f167b3b2253b08",
+                                                        "date":  "2026-10-15T08:41:15.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084314",
+                               "production_name":  "restrict_seller_trade_stats_rpc",
+                               "source_path":  "supabase/migrations/20261015094000_restrict_seller_trade_stats_rpc.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "a5e921dde01ca96b1de859dc1a3129114e846ccc",
+                                                            "date":  "2026-10-15T08:43:07.0000000Z",
+                                                            "blob":  "71da2a61b3ff745c3c578a42c5d2af29bbd1dd34",
+                                                            "bytes":  366
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "a5e921dde01ca96b1de859dc1a3129114e846ccc",
+                                                        "date":  "2026-10-15T08:43:07.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084355",
+                               "production_name":  "restrict_user_block_counts_rpc",
+                               "source_path":  "supabase/migrations/20261015095000_restrict_user_block_counts_rpc.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "8500f5e3d7a313b6bd18596af2d43340c0b7ae6c",
+                                                            "date":  "2026-10-15T08:43:50.0000000Z",
+                                                            "blob":  "3f4ff7cd247ce2014a8629b22980fdd01724eb7b",
+                                                            "bytes":  344
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "8500f5e3d7a313b6bd18596af2d43340c0b7ae6c",
+                                                        "date":  "2026-10-15T08:43:50.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084456",
+                               "production_name":  "restrict_kyc_failure_rpcs",
+                               "source_path":  "supabase/migrations/20261015100000_restrict_kyc_failure_rpcs.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "2f86eac54bbee434571544c620136a10029f0873",
+                                                            "date":  "2026-10-15T08:44:51.0000000Z",
+                                                            "blob":  "88f3e3c2626fffe78b0f3b698b1f882b5630e637",
+                                                            "bytes":  659
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "2f86eac54bbee434571544c620136a10029f0873",
+                                                        "date":  "2026-10-15T08:44:51.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084549",
+                               "production_name":  "restrict_custom_access_token_hook",
+                               "source_path":  "supabase/migrations/20261015101000_restrict_custom_access_token_hook.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "23c21a0b67b99d6821d64cbe89837d8cfe5085ce",
+                                                            "date":  "2026-10-15T08:45:44.0000000Z",
+                                                            "blob":  "0f775cb41cc21db4ce597eddc0a9d2ba234eef87",
+                                                            "bytes":  326
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "23c21a0b67b99d6821d64cbe89837d8cfe5085ce",
+                                                        "date":  "2026-10-15T08:45:44.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084643",
+                               "production_name":  "restrict_handle_new_user_rpc",
+                               "source_path":  "supabase/migrations/20261015102000_restrict_handle_new_user_rpc.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "5ccb14712389475fab7f4e0cdfe6070444f678e8",
+                                                            "date":  "2026-10-15T08:46:38.0000000Z",
+                                                            "blob":  "a6034ffab418b9a44b9713e1a6af405ee5533203",
+                                                            "bytes":  239
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "5ccb14712389475fab7f4e0cdfe6070444f678e8",
+                                                        "date":  "2026-10-15T08:46:38.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084748",
+                               "production_name":  "restrict_orphaned_user_trigger_functions",
+                               "source_path":  "supabase/migrations/20261015103000_restrict_orphaned_user_trigger_functions.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "e24330e516d0801d4ab4b94c45d9bf87222156a5",
+                                                            "date":  "2026-10-15T08:47:42.0000000Z",
+                                                            "blob":  "a3c33f32ac99e67e739df32ec2b8d406e8cf34d2",
+                                                            "bytes":  498
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "e24330e516d0801d4ab4b94c45d9bf87222156a5",
+                                                        "date":  "2026-10-15T08:47:42.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015084929",
+                               "production_name":  "restrict_profile_status_trigger_function",
+                               "source_path":  "supabase/migrations/20261015105000_restrict_profile_status_trigger_function.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "94b4380ebfa998be950f5196ebade3ce643ae98b",
+                                                        "date":  "2026-10-15T08:49:42.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085016",
+                               "production_name":  "restrict_trade_volume_trigger_function",
+                               "source_path":  "supabase/migrations/20261015110000_restrict_trade_volume_trigger_function.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "607689a4ccb8c9653ca76acf5109010a20a3c25d",
+                                                        "date":  "2026-10-15T08:50:23.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085058",
+                               "production_name":  "restrict_unauthorized_profile_update_trigger",
+                               "source_path":  "supabase/migrations/20261015111000_restrict_unauthorized_profile_update_trigger.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "9f8fa638fb240831390e843f4fc70a36ae860259",
+                                                        "date":  "2026-10-15T08:51:05.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085143",
+                               "production_name":  "restrict_usd_value_trade_trigger",
+                               "source_path":  "supabase/migrations/20261015112000_restrict_usd_value_trade_trigger.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "d71db19b96dace729aa029396fbb7bab447a87b9",
+                                                        "date":  "2026-10-15T08:51:51.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085227",
+                               "production_name":  "restrict_resolve_trade_ad_id_trigger",
+                               "source_path":  "supabase/migrations/20261015113000_restrict_resolve_trade_ad_id_trigger.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "ee04b675f76117f2736a89159399dfb87581481e",
+                                                        "date":  "2026-10-15T08:52:33.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085315",
+                               "production_name":  "restrict_sync_auth_metadata_trigger",
+                               "source_path":  "supabase/migrations/20261015114000_restrict_sync_auth_metadata_trigger.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "2c295fccc8e1a20652a56382ac0ce4ad5638df28",
+                                                        "date":  "2026-10-15T08:53:22.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085342",
+                               "production_name":  "restrict_sync_trade_user_ids_trigger",
+                               "source_path":  "supabase/migrations/20261015115000_restrict_sync_trade_user_ids_trigger.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "7cec687b483af27d4b3135831cf0e54a36e2bb4d",
+                                                        "date":  "2026-10-15T08:53:48.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085536",
+                               "production_name":  "restrict_generate_random_username_rpc",
+                               "source_path":  "supabase/migrations/20261015120000_restrict_generate_random_username_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "566e0a8a315ea307f9e1d31c257af0a9cd6ee48e",
+                                                        "date":  "2026-10-15T08:55:43.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085629",
+                               "production_name":  "restrict_generate_system_username_rpc",
+                               "source_path":  "supabase/migrations/20261015121000_restrict_generate_system_username_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "98118b03b3f8c25e9102bf71768f9c2918af16c3",
+                                                        "date":  "2026-10-15T08:56:40.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085720",
+                               "production_name":  "restrict_resolve_system_alert_rpc",
+                               "source_path":  "supabase/migrations/20261015122000_restrict_resolve_system_alert_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "7eb0b8a62e2f14130104205c40f81ed639fc8762",
+                                                        "date":  "2026-10-15T08:57:26.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085841",
+                               "production_name":  "restrict_sync_didit_kyc_status_rpc",
+                               "source_path":  "supabase/migrations/20261015123000_restrict_sync_didit_kyc_status_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "46e2281ede35383b6d44c2e081ab3753b8af28a4",
+                                                        "date":  "2026-10-15T08:58:43.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015085934",
+                               "production_name":  "restrict_update_user_presence_rpc",
+                               "source_path":  "supabase/migrations/20261015124000_restrict_update_user_presence_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "81a3346bdf41b3427a37ab09000b50ba916c0b65",
+                                                        "date":  "2026-10-15T08:59:35.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090026",
+                               "production_name":  "restrict_sync_user_reputation_trigger_function",
+                               "source_path":  "supabase/migrations/20261015125000_restrict_sync_user_reputation_trigger_function.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "837d2b6ee7a11d455a3351534eed8a77a06d6aa1",
+                                                        "date":  "2026-10-15T09:00:27.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090116",
+                               "production_name":  "harden_custom_trade_status_lower_search_path",
+                               "source_path":  "supabase/migrations/20261015130000_harden_custom_trade_status_lower_search_path.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "2277430bee2b815adb51a2cb7aa06c95c33ce850",
+                                                        "date":  "2026-10-15T09:01:18.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090145",
+                               "production_name":  "restrict_rls_auto_enable_event_trigger_function",
+                               "source_path":  "supabase/migrations/20261015131000_restrict_rls_auto_enable_event_trigger_function.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "330e2cafe8c4396417cd329ed3516382d6820384",
+                                                        "date":  "2026-10-15T09:01:46.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090241",
+                               "production_name":  "restrict_sync_profile_username_trigger_function",
+                               "source_path":  "supabase/migrations/20261015132000_restrict_sync_profile_username_trigger_function.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "28b7166db672026131f084777bacd12f133587fa",
+                                                        "date":  "2026-10-15T09:02:44.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090443",
+                               "production_name":  "harden_admin_update_user_role_audit_identity",
+                               "source_path":  "supabase/migrations/20261015133000_harden_admin_update_user_role_audit_identity.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "eab70e03ad5208fa0766779ce15c193a17f91eaa",
+                                                        "date":  "2026-10-15T09:04:45.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090700",
+                               "production_name":  "restrict_profile_mutations_and_protect_privileged_columns",
+                               "source_path":  "supabase/migrations/20261015134000_restrict_profile_mutations_and_protect_privileged_columns.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "19eaefc051fed3696d82ed2292f29e8ae1a12438",
+                                                        "date":  "2026-10-15T09:07:02.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090749",
+                               "production_name":  "remove_server_managed_profile_column_updates",
+                               "source_path":  "supabase/migrations/20261015135000_remove_server_managed_profile_column_updates.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "1a9b20d7be047680d5cb654c3dd4e137d1e1c89b",
+                                                        "date":  "2026-10-15T09:07:51.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090828",
+                               "production_name":  "restrict_profile_country_and_birthdate_updates",
+                               "source_path":  "supabase/migrations/20261015140000_restrict_profile_country_and_birthdate_updates.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "89a5fdcab499bd14472ca1c476097bd28a8d9499",
+                                                        "date":  "2026-10-15T09:08:30.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015090923",
+                               "production_name":  "protect_profile_kyc_status_from_public_reads",
+                               "source_path":  "supabase/migrations/20261015141000_protect_profile_kyc_status_from_public_reads.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "39365271cefdd327994a8e54547e4efb2c65583c",
+                                                        "date":  "2026-10-15T09:09:25.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091019",
+                               "production_name":  "protect_profile_country_from_public_reads",
+                               "source_path":  "supabase/migrations/20261015142000_protect_profile_country_from_public_reads.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "251b026c662d63aa7ddd665dafa16ac493b43773",
+                                                        "date":  "2026-10-15T09:10:21.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091105",
+                               "production_name":  "restrict_public_profile_verification_flags",
+                               "source_path":  "supabase/migrations/20261015143000_restrict_public_profile_verification_flags.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "2e8abce29769f61fd9a5bf3d12dc6fe1294a38e6",
+                                                        "date":  "2026-10-15T09:11:08.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091148",
+                               "production_name":  "restrict_public_profile_last_seen_timestamp",
+                               "source_path":  "supabase/migrations/20261015144000_restrict_public_profile_last_seen_timestamp.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "3de61878f41a17d0cef29da062a025e03db24be7",
+                                                        "date":  "2026-10-15T09:11:50.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091409",
+                               "production_name":  "harden_profile_update_trigger_search_path",
+                               "source_path":  "supabase/migrations/20261015150000_harden_profile_update_trigger_search_path.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "fd14fc9dbd8ed49bffa9cb3f878444644af04168",
+                                                        "date":  "2026-10-15T09:14:14.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091457",
+                               "production_name":  "harden_transfer_immutability_trigger_search_path",
+                               "source_path":  "supabase/migrations/20261015151000_harden_transfer_immutability_trigger_search_path.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "a36719d9d0353c6503ef51e22ab0171bbb841c7e",
+                                                        "date":  "2026-10-15T09:14:59.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015091849",
+                               "production_name":  "restrict_check_is_admin_rpc_to_trusted_callers",
+                               "source_path":  "supabase/migrations/20261015162000_restrict_check_is_admin_rpc_to_trusted_callers.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "911e2c9fc9d0563b0febbf31f23e7dee6052a1b6",
+                                                            "date":  "2026-10-15T09:18:41.0000000Z",
+                                                            "blob":  "211070cb7cd0570ac364bb0d67812874566a9e77",
+                                                            "bytes":  357
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "911e2c9fc9d0563b0febbf31f23e7dee6052a1b6",
+                                                        "date":  "2026-10-15T09:18:41.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015092011",
+                               "production_name":  "harden_emergency_admin_rpc_search_paths",
+                               "source_path":  "supabase/migrations/20261015164000_harden_emergency_admin_rpc_search_paths.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "f99d20ee8eb4424e0feec87ea1a8d8eb5ca8b5b9",
+                                                        "date":  "2026-10-15T09:20:23.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015092105",
+                               "production_name":  "harden_bulk_account_admin_rpc_search_paths",
+                               "source_path":  "supabase/migrations/20261015165000_harden_bulk_account_admin_rpc_search_paths.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "a236e4e89c17ae0188f005d0eb59a1de56b7718d",
+                                                            "date":  "2026-10-15T09:20:57.0000000Z",
+                                                            "blob":  "424a0d702bd762bb0f41822e0bdaf0387affa5cd",
+                                                            "bytes":  613
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "a236e4e89c17ae0188f005d0eb59a1de56b7718d",
+                                                        "date":  "2026-10-15T09:20:57.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015092153",
+                               "production_name":  "harden_admin_role_and_login_rpc_search_paths",
+                               "source_path":  "supabase/migrations/20261015170000_harden_admin_role_and_login_rpc_search_paths.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "6c694c73adefdb8bfae7c321e138843b1a0aa7c9",
+                                                        "date":  "2026-10-15T09:22:05.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015092309",
+                               "production_name":  "restrict_unsafe_trade_settlement_rpcs",
+                               "source_path":  "supabase/migrations/20261015171000_restrict_unsafe_trade_settlement_rpcs.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "5265e8ae834738e4c3ec26b80e41928acd59d353",
+                                                            "date":  "2026-10-15T09:23:01.0000000Z",
+                                                            "blob":  "fbddaa8af79d73b038f9a3064763504aee838179",
+                                                            "bytes":  572
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "5265e8ae834738e4c3ec26b80e41928acd59d353",
+                                                        "date":  "2026-10-15T09:23:01.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015093122",
+                               "production_name":  "enforce_trade_escrow_account_eligibility",
+                               "source_path":  "supabase/migrations/20261015181000_enforce_trade_escrow_account_eligibility.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "5d3c30e775f72cdd81a6d9361724421eba694257",
+                                                        "date":  "2026-10-15T09:31:42.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015093442",
+                               "production_name":  "fail_closed_trade_escrow_account_status",
+                               "source_path":  "supabase/migrations/20261015183000_fail_closed_trade_escrow_account_status.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "f5956b9e74b2b783739f5de4496a8a84c1b60f6d",
+                                                        "date":  "2026-10-15T09:34:55.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015100457",
+                               "production_name":  "enforce_ad_fiat_limits_and_payment_methods",
+                               "source_path":  "supabase/migrations/20261015190000_enforce_ad_fiat_limits_and_payment_methods.sql",
+                               "pre_deploy_candidate":  {
+                                                            "commit":  "4bca67bed7441440a78cc45a7acfb4f9f589c775",
+                                                            "date":  "2026-10-15T10:04:48.0000000Z",
+                                                            "blob":  "619a340ddff453ae1b62a5258b1b32d7ad975eb7",
+                                                            "bytes":  3574
+                                                        },
+                               "latest_available":  {
+                                                        "commit":  "4bca67bed7441440a78cc45a7acfb4f9f589c775",
+                                                        "date":  "2026-10-15T10:04:48.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015101100",
+                               "production_name":  "fail_closed_invalid_trade_ad_price",
+                               "source_path":  "supabase/migrations/20261015133000_fail_closed_invalid_trade_ad_price.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "b2c406b4267fdfa2babaeaf5be3c8ad4cc9b86b2",
+                                                        "date":  "2026-10-15T10:11:18.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015102053",
+                               "production_name":  "restrict_legacy_release_seller_escrow_rpc",
+                               "source_path":  "supabase/migrations/20261015194500_restrict_legacy_release_seller_escrow_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "088188ce54f86d56210a026d80e7bab816e988da",
+                                                        "date":  "2026-10-15T10:21:13.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015102335",
+                               "production_name":  "restrict_legacy_initiate_p2p_trade_rpc",
+                               "source_path":  "supabase/migrations/20261015200000_restrict_legacy_initiate_p2p_trade_rpc.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "a787ef2436f2dde15badebd3da4a9b3ab0c7ce8e",
+                                                        "date":  "2026-10-15T10:23:40.0000000Z"
+                                                    }
+                           },
+                           {
+                               "production_version":  "20261015102528",
+                               "production_name":  "restrict_legacy_trade_completion_rpcs",
+                               "source_path":  "supabase/migrations/20261015201500_restrict_legacy_trade_completion_rpcs.sql",
+                               "pre_deploy_candidate":  null,
+                               "latest_available":  {
+                                                        "commit":  "26ff5bb8bd115c267325de4848f995d17eb6452e",
+                                                        "date":  "2026-10-15T10:26:47.0000000Z"
+                                                    }
+                           }
+                       ]
+}

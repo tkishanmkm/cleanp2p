@@ -10,6 +10,9 @@ export async function updateUserRoleAction(userId: string, newRole: "user" | "ad
   if (!auth.authorized || !auth.adminId) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
+  if (auth.supportAdmin === true) {
+    return { success: false, error: "Support administrators cannot perform this account-administration action." };
+  }
 
   // Strictly block self-role modification / privilege escalation
   if (userId === auth.adminId) {
@@ -58,6 +61,9 @@ export async function toggleUserSuspensionAction(userId: string, currentSuspende
   if (!auth.authorized || !auth.adminId) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
+  if (auth.supportAdmin === true) {
+    return { success: false, error: "Support administrators cannot perform this account-administration action." };
+  }
 
   // Block self-suspension
   if (userId === auth.adminId) {
@@ -98,6 +104,9 @@ export async function toggleUserBanStatus(userId: string, isBanned: boolean) {
   if (!auth.authorized || !auth.adminId) {
     throw new Error("Unauthorized: Administrator privileges required.");
   }
+  if (auth.supportAdmin === true) {
+    throw new Error("Support administrators cannot perform this account-administration action.");
+  }
 
   // Block self-ban
   if (userId === auth.adminId) {
@@ -135,30 +144,38 @@ export async function freezeUserAction(targetUserId: string, reason: string) {
   if (!auth.authorized || !auth.adminId) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
+  if (auth.supportAdmin === true) {
+    return { success: false, error: "Support administrators cannot perform this account-administration action." };
+  }
 
   if (targetUserId === auth.adminId) {
     return { success: false, error: "Forbidden: Administrators cannot apply an emergency freeze to their own account." };
   }
 
   const cleanReason = (reason || "").trim();
-  if (!cleanReason) {
+  if (cleanReason.length < 3) {
     return { success: false, error: "Reason required: An explicit reason must be provided for an emergency freeze." };
   }
 
+  // The server gate has verified the current administrator and signed 2FA session.
   const adminSupabase = createAdminClient();
 
-  // Execute canonical DB RPC admin_freeze_user strictly
   try {
-    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_freeze_user", {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_freeze_user_authorized", {
       p_target_user_id: targetUserId,
       p_reason: cleanReason,
+      p_actor_id: auth.adminId,
+      p_actor_email: auth.adminEmail ?? null,
     });
 
     if (rpcErr) {
       return { success: false, error: rpcErr.message };
     }
-  } catch (err: any) {
-    return { success: false, error: err?.message || "Failed to apply emergency freeze." };
+    if (!rpcData || typeof rpcData !== "object" || rpcData.success !== true) {
+      return { success: false, error: "Emergency freeze was not confirmed by the database." };
+    }
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to apply emergency freeze." };
   }
 
   revalidatePath("/adminnarayan/users");
@@ -172,22 +189,30 @@ export async function unfreezeUserAction(targetUserId: string, reason?: string) 
   if (!auth.authorized || !auth.adminId) {
     return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
+  if (auth.supportAdmin === true) {
+    return { success: false, error: "Support administrators cannot perform this account-administration action." };
+  }
 
   const cleanReason = (reason || "").trim() || "Admin unfreeze";
+  // The server gate has verified the current administrator and signed 2FA session.
   const adminSupabase = createAdminClient();
 
-  // Execute canonical DB RPC admin_unfreeze_user strictly
   try {
-    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_unfreeze_user", {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_unfreeze_user_authorized", {
       p_target_user_id: targetUserId,
       p_reason: cleanReason,
+      p_actor_id: auth.adminId,
+      p_actor_email: auth.adminEmail ?? null,
     });
 
     if (rpcErr) {
       return { success: false, error: rpcErr.message };
     }
-  } catch (err: any) {
-    return { success: false, error: err?.message || "Failed to lift emergency freeze." };
+    if (!rpcData || typeof rpcData !== "object" || rpcData.success !== true) {
+      return { success: false, error: "Emergency unfreeze was not confirmed by the database." };
+    }
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to lift emergency freeze." };
   }
 
   revalidatePath("/adminnarayan/users");

@@ -19,13 +19,21 @@ function Run-Check([string]$Name, [string]$Command, [string[]]$Arguments) {
   $Log = Join-Path $LogDir ("{0}-{1}.log" -f $Stamp, ($Name -replace '[^a-zA-Z0-9_-]','-'))
   Write-Host ("=== {0} ===" -f $Name)
   Push-Location $RepoRoot
+  $PreviousErrorActionPreference = $ErrorActionPreference
   try {
+    # Windows PowerShell 5.1 can turn native stderr (for example npm warnings)
+    # into terminating NativeCommandError records when ErrorActionPreference=Stop.
+    # Temporarily allow stderr through so the real process exit code is captured.
+    $ErrorActionPreference = "Continue"
     & $Command @Arguments 2>&1 | Tee-Object -FilePath $Log
     $Code = $LASTEXITCODE
   } catch {
     $_ | Out-File -FilePath $Log -Append
     $Code = 1
-  } finally { Pop-Location }
+  } finally {
+    $ErrorActionPreference = $PreviousErrorActionPreference
+    Pop-Location
+  }
   if ($Code -eq 0) { Add-Result $Name "PASS" $Code $Log } else { Add-Result $Name "FAIL" $Code $Log }
 }
 function Get-DirectorySizeBytes([string]$Path) {
@@ -45,13 +53,27 @@ $Disk = Get-PSDrive -Name $DriveName -ErrorAction SilentlyContinue
 if ($Disk -and $Disk.Free -lt 5GB) { throw "Less than 5 GB free on the repository drive. Free space before installing dependencies." }
 $Package = Get-Content (Join-Path $RepoRoot "package.json") -Raw | ConvertFrom-Json
 if (!$Package.scripts.typecheck) { throw "package.json has no typecheck script; refusing to guess a command." }
-if (!$SkipInstall -and !(Test-Path (Join-Path $RepoRoot "node_modules"))) {
+$RequiredBins = @(
+  (Join-Path $RepoRoot "node_modules\.bin\tsc.cmd"),
+  (Join-Path $RepoRoot "node_modules\.bin\next.cmd"),
+  (Join-Path $RepoRoot "node_modules\.bin\eslint.cmd")
+)
+$MissingBins = @($RequiredBins | Where-Object { !(Test-Path $_) })
+if (!$SkipInstall -and (!(Test-Path (Join-Path $RepoRoot "node_modules")) -or $MissingBins.Count -gt 0)) {
   if (!(Test-Path (Join-Path $RepoRoot "package-lock.json"))) { throw "package-lock.json missing; cannot perform reproducible npm ci." }
+  if ($MissingBins.Count -gt 0) {
+    Write-Host "Dependency folder exists but required local tools are missing; repairing with npm ci."
+    $MissingBins | ForEach-Object { Write-Host ("Missing: {0}" -f $_) }
+  }
   Run-Check "Install locked dependencies" "npm" @("ci","--no-audit","--no-fund")
+  $MissingAfterInstall = @($RequiredBins | Where-Object { !(Test-Path $_) })
+  if ($MissingAfterInstall.Count -gt 0) {
+    throw ("npm ci completed but required tools are still missing: " + ($MissingAfterInstall -join ", "))
+  }
 } elseif ($SkipInstall) {
   Write-Host "Dependency install skipped by user flag."
 } else {
-  Write-Host "node_modules already exists; install skipped."
+  Write-Host "Required local tools exist; locked install skipped."
 }
 $NodeModulesSize = Get-DirectorySizeBytes (Join-Path $RepoRoot "node_modules")
 Write-Host ("node_modules size: {0:N2} GB" -f ($NodeModulesSize / 1GB))

@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.check_is_admin(uuid, uuid) FROM PUBLIC, anon, authenticated; GRANT EXECUTE ON FUNCTION public.check_is_admin(uuid, uuid) TO service_role;

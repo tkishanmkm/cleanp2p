@@ -1,3 +1,4 @@
+import 'server-only';
 import { getBrowserClient } from '@/lib/supabaseClient';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin as authoritativeAdmin } from '@/lib/supabaseAdmin';

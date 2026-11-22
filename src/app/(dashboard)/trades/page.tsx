@@ -29,6 +29,7 @@ import { useRouter } from 'next/navigation';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { supabase } from '@/lib/supabase/client';
 import { formatCompactUtc } from '@/lib/date-utils';
+import { useI18n } from '@/context/i18n-context';
 
 function DashboardCardSkeleton() {
   return (
@@ -47,6 +48,7 @@ function DashboardCardSkeleton() {
 export default function MyTradesPage() {
   const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
   const router = useRouter();
+  const { t, language } = useI18n();
 
   const [allTrades, setAllTrades] = useState<Trade[]>([]);
   const [isLoadingTrades, setIsLoadingTrades] = useState(true);
@@ -81,7 +83,7 @@ export default function MyTradesPage() {
       let profileMap: Record<string, any> = {};
       if (allUserIds.length > 0) {
         const { data: profiles } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('id, username, display_name, country, country_code, avatar_url, photo_url')
           .in('id', allUserIds);
 
@@ -305,7 +307,7 @@ export default function MyTradesPage() {
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `paxones_activity_history_${Date.now()}.csv`);
+      link.setAttribute('download', `wayones_activity_history_${Date.now()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -327,14 +329,23 @@ export default function MyTradesPage() {
   }
 
   const user = profile;
+  const getTradeStatusLabel = (status: string) => {
+    const keyByStatus: Record<string, string> = {
+      active: 'statusActive', pending: 'statusPending', paid: 'statusPaid', buyer_marked_paid: 'statusPaid',
+      payment_sent: 'statusPaid', disputed: 'statusDisputed', dispute: 'statusDisputed', released: 'statusReleased',
+      completed: 'statusCompleted', cancelled: 'statusCancelled', canceled: 'statusCancelled', expired: 'statusExpired',
+    };
+    const key = keyByStatus[String(status || '').toLowerCase()];
+    return key ? t('activeTrades.' + key) : status;
+  };
 
   return (
     <>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold md:text-2xl">My Trades & Statistics</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">{t('tradeHistoryPage.title')}</h1>
         <Button onClick={handleDownloadCSV} variant="outline" disabled={!allTrades.length}>
           <Download className="mr-2 h-4 w-4" />
-          Download CSV
+          {t('tradeHistoryPage.downloadCsv')}
         </Button>
       </div>
 
@@ -344,11 +355,11 @@ export default function MyTradesPage() {
         ) : (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Volume</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('tradeHistoryPage.totalVolume')}</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${(user?.tradeVolume || 0).toLocaleString()}</div>
+              <div className="text-2xl font-bold">${(user?.tradeVolume || 0).toLocaleString(language)}</div>
             </CardContent>
           </Card>
         )}
@@ -357,7 +368,7 @@ export default function MyTradesPage() {
         ) : (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Completed Trades</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('tradeHistoryPage.completedTrades')}</CardTitle>
               <CheckCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -370,7 +381,7 @@ export default function MyTradesPage() {
         ) : (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Feedback</CardTitle>
+              <CardTitle className="text-sm font-medium">{t('tradeHistoryPage.feedback')}</CardTitle>
               <div className="flex gap-1 text-muted-foreground">
                 <ThumbsUp className="h-4 w-4" />
                 <ThumbsDown className="h-4 w-4" />
@@ -382,7 +393,7 @@ export default function MyTradesPage() {
                 <span>/</span>
                 <span className="text-red-600">{user?.negativeFeedback || 0}</span>
               </div>
-              <p className="text-xs text-muted-foreground">Positive / Negative</p>
+              <p className="text-xs text-muted-foreground">{t('tradeHistoryPage.positiveNegative')}</p>
             </CardContent>
           </Card>
         )}
@@ -390,27 +401,27 @@ export default function MyTradesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Trade History</CardTitle>
-          <CardDescription>A log of all your past and active trades.</CardDescription>
+          <CardTitle>{t('tradeHistoryPage.historyTitle')}</CardTitle>
+          <CardDescription>{t('tradeHistoryPage.historyDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Trade ID</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Partner</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnTradeId')}</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnRole')}</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnPartner')}</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnAmount')}</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnStatus')}</TableHead>
+                <TableHead>{t('tradeHistoryPage.columnDate')}</TableHead>
+                <TableHead className="text-right">{t('tradeHistoryPage.columnAction')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoadingTrades && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center">
-                    Loading trades...
+                    {t('tradeHistoryPage.loadingTrades')}
                   </TableCell>
                 </TableRow>
               )}
@@ -430,7 +441,7 @@ export default function MyTradesPage() {
                               : "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30 hover:bg-purple-500/25"
                           )}
                         >
-                          {isBuyer ? 'Buyer' : 'Seller'}
+                          {isBuyer ? t('tradeHistoryPage.buyer') : t('tradeHistoryPage.seller')}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -444,17 +455,17 @@ export default function MyTradesPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={cn('capitalize', statusColors[trade.status])}>
-                          {trade.status}
+                          {getTradeStatusLabel(trade.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {trade.createdAt ? formatCompactUtc(trade.createdAt) : 'N/A'}
+                        {trade.createdAt ? formatCompactUtc(trade.createdAt) : t('tradeHistoryPage.notAvailable')}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="outline" size="sm" asChild>
                           <Link href={`/trade/${trade.id}`}>
                             <ArrowLeftRight className="mr-2 h-3 w-3" />
-                            View
+                            {t('tradeHistoryPage.view')}
                           </Link>
                         </Button>
                       </TableCell>
@@ -464,7 +475,7 @@ export default function MyTradesPage() {
               {!isLoadingTrades && !allTrades.length && (
                 <TableRow>
                   <TableCell colSpan={7} className="h-24 text-center">
-                    You have no trades yet.
+                    {t('tradeHistoryPage.noTrades')}
                   </TableCell>
                 </TableRow>
               )}

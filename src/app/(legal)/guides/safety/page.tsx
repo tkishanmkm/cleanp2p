@@ -3,8 +3,8 @@ import { ArrowLeft, ShieldAlert, CheckCircle2, XCircle, AlertOctagon, Lock, Eye,
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Trade Safety & Fraud Prevention | Paxones Guides',
-  description: 'Essential security guidelines, anti-scam warnings, and best practices to keep your funds completely safe on Paxones.',
+  title: 'Trade Safety & Fraud Prevention | Guides',
+  description: 'Essential security guidelines, anti-scam warnings, and best practices to keep your funds completely safe on Wayones.',
 };
 
 export default function TradeSafetyGuidePage() {
@@ -42,9 +42,9 @@ export default function TradeSafetyGuidePage() {
               </div>
               <ul className="text-sm space-y-2 text-slate-700 dark:text-slate-300">
                 <li>Log in to your <strong>official banking app</strong> to verify incoming payments before releasing crypto.</li>
-                <li>Stay inside the <strong>Paxones trade chat</strong> for all communication and receipts.</li>
-                <li>Ensure the sender's bank account name matches their Paxones <strong>verified legal name</strong>.</li>
-                <li>Enable <strong>Two-Factor Authentication (2FA)</strong> on your Paxones account.</li>
+                <li>Stay inside the <strong>Wayones trade chat</strong> for all communication and receipts.</li>
+                <li>Ensure the sender's bank account name matches their Wayones <strong>verified legal name</strong>.</li>
+                <li>Enable <strong>Two-Factor Authentication (2FA)</strong> on your Wayones account.</li>
               </ul>
             </div>
 
@@ -85,7 +85,7 @@ export default function TradeSafetyGuidePage() {
                 <strong>How it works:</strong> A buyer uses a stolen credit card or hacked bank account, sends payment, and subsequently reports fraud to their bank to charge back the funds.
               </p>
               <p className="text-sm text-emerald-700 dark:text-emerald-400 mt-2 font-medium">
-                <strong>Defense:</strong> Enforce strict name matching. Reject any payment where the remitter's bank name differs from the verified name on Paxones.
+                <strong>Defense:</strong> Enforce strict name matching. Reject any payment where the remitter's bank name differs from the verified name on Wayones.
               </p>
             </div>
 
@@ -95,7 +95,7 @@ export default function TradeSafetyGuidePage() {
                 <strong>How it works:</strong> A user asks you to continue the trade on Telegram claiming lower fees or faster speed, sending links to a fake escrow bot.
               </p>
               <p className="text-sm text-emerald-700 dark:text-emerald-400 mt-2 font-medium">
-                <strong>Defense:</strong> Paxones staff and moderators will NEVER message you on external messaging platforms or ask for your password or private keys.
+                <strong>Defense:</strong> Wayones staff and moderators will NEVER message you on external messaging platforms or ask for your password or private keys.
               </p>
             </div>
           </div>

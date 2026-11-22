@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.get_seller_trade_stats(uuid) FROM PUBLIC, anon, authenticated; GRANT EXECUTE ON FUNCTION public.get_seller_trade_stats(uuid) TO service_role;

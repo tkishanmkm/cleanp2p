@@ -6,9 +6,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return auth.response!;
+    const auth = await verifyServerAdmin(req, { allowSupportReadOnly: true });
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
+      return NextResponse.json(
+        { success: false, error: "Full administrator access is required for unrestricted platform search." },
+        { status: 403 }
+      );
     }
 
     const { searchParams } = new URL(req.url);
@@ -42,7 +46,7 @@ export async function GET(req: NextRequest) {
       { data: ads },
       { data: disputes },
     ] = await Promise.all([
-      supabase.from("profiles").select("*"),
+      supabase.from("profiles").select("id, username, display_name, full_name, email, role, status, is_banned, is_suspended, is_restricted, account_status, country, avatar_url, photo_url, created_at, is_verified, id_verified, kyc_status"),
       supabase.from("trades").select("*"),
       supabase.from("deposits").select("*"),
       supabase.from("withdrawals").select("*"),

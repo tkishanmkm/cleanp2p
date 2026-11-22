@@ -36,7 +36,7 @@ import {
 import { MoreHorizontal, Check, X, Search, Copy } from 'lucide-react';
 import type { Withdrawal } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { approveWithdrawal, declineWithdrawal } from '@/lib/admin';
+
 import { supabase } from '@/lib/supabase/client';
 import { formatUtcDateTime } from '@/lib/date-utils';
 import { useAuth } from '@/components/providers/auth-provider';

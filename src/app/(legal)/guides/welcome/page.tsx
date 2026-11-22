@@ -3,8 +3,8 @@ import { ArrowLeft, CheckCircle2, ShieldCheck, Zap, Users, Globe, Lock, Coins, S
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Welcome to Paxones | Trading Guides',
-  description: 'Learn how Paxones peer-to-peer cryptocurrency marketplace empowers global traders with zero-compromise escrow security.',
+  title: 'Welcome to Trading Guides',
+  description: 'Learn how Wayones peer-to-peer cryptocurrency marketplace empowers global traders with zero-compromise escrow security.',
 };
 
 export default function WelcomeGuidePage() {
@@ -23,7 +23,7 @@ export default function WelcomeGuidePage() {
           <Sparkles className="h-3.5 w-3.5" /> Guide 01 • Getting Started
         </div>
         <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white">
-          Welcome to Paxones
+          Welcome to Wayones
         </h1>
         <p className="mt-3 text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
           The next-generation peer-to-peer (P2P) cryptocurrency platform engineered for freedom, speed, and uncompromising escrow security.
@@ -32,23 +32,23 @@ export default function WelcomeGuidePage() {
 
       {/* Guide Content Sections */}
       <div className="space-y-10 text-slate-700 dark:text-slate-300 leading-relaxed">
-        {/* What is Paxones */}
+        {/* What is Wayones */}
         <section className="space-y-4">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
-            <Globe className="h-6 w-6 text-emerald-600" /> What is Paxones?
+            <Globe className="h-6 w-6 text-emerald-600" /> What is Wayones?
           </h2>
           <p>
-            Paxones is a decentralized, peer-to-peer financial trading hub that connects cryptocurrency buyers and sellers directly worldwide. Unlike traditional custodial exchanges where your assets can be frozen or trapped in complex withdrawal queues, Paxones allows you to trade Bitcoin (BTC), Tether (USDT), Ethereum (ETH), and Litecoin (LTC) directly using your preferred local currency and payment methods.
+            Wayones is a decentralized, peer-to-peer financial trading hub that connects cryptocurrency buyers and sellers directly worldwide. Unlike traditional custodial exchanges where your assets can be frozen or trapped in complex withdrawal queues, Wayones allows you to trade Bitcoin (BTC), Tether (USDT), Ethereum (ETH), and Litecoin (LTC) directly using your preferred local currency and payment methods.
           </p>
           <p>
-            Whether you want to pay with bank wire transfers, UPI, IMPS, SEPA, PayPal, Revolut, Wise, or gift cards, Paxones provides the real-time marketplace and secure infrastructure to transact with peace of mind.
+            Whether you want to pay with bank wire transfers, UPI, IMPS, SEPA, PayPal, Revolut, Wise, or gift cards, Wayones provides the real-time marketplace and secure infrastructure to transact with peace of mind.
           </p>
         </section>
 
         {/* The 3 Core Pillars */}
         <section className="space-y-4">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
-            <Lock className="h-6 w-6 text-emerald-600" /> The Three Pillars of Paxones
+            <Lock className="h-6 w-6 text-emerald-600" /> The Three Pillars of Wayones
           </h2>
           <div className="grid sm:grid-cols-3 gap-6 pt-2">
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-[#1e2640] bg-slate-50 dark:bg-[#101726]">
@@ -100,7 +100,7 @@ export default function WelcomeGuidePage() {
               <div className="h-7 w-7 rounded-full bg-emerald-600 text-white font-bold text-sm flex items-center justify-center shrink-0 mt-0.5">2</div>
               <div>
                 <p className="font-semibold text-slate-900 dark:text-white">Crypto Enters Safe Escrow</p>
-                <p className="text-sm text-slate-600 dark:text-slate-400">The moment you start a trade, the seller's crypto is locked safely in the Paxones escrow vault.</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">The moment you start a trade, the seller's crypto is locked safely in the Wayones escrow vault.</p>
               </div>
             </div>
             <div className="flex gap-4 items-start">
@@ -126,7 +126,7 @@ export default function WelcomeGuidePage() {
             <CheckCircle2 className="h-5 w-5 text-emerald-600" /> Platform Golden Rule
           </h4>
           <p className="text-sm mt-2 leading-relaxed">
-            All trade negotiations and conversations must take place exclusively within the encrypted Paxones trade chat. Never conduct business on WhatsApp, Telegram, or Discord. In case of any disagreement, platform moderators can only review evidence contained inside your trade room.
+            All trade negotiations and conversations must take place exclusively within the encrypted Wayones trade chat. Never conduct business on WhatsApp, Telegram, or Discord. In case of any disagreement, platform moderators can only review evidence contained inside your trade room.
           </p>
         </div>
 

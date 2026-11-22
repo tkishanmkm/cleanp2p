@@ -62,39 +62,18 @@ export function MyPostedAdsSection({ userId }: { userId: string }) {
       setLoading(true);
 
       try {
-        // Try querying p2p_ads first, with fallback to ads
+        // Load the owner's advertisements independently from profile identity.
+        // Never depend on a public/private profiles relationship join for ad reads.
         let result = await supabase
           .from("p2p_ads")
-          .select(`
-            *,
-            user:profiles (
-              id,
-              username,
-              country,
-              feedback_score,
-              positive_feedback,
-              negative_feedback,
-              completed_trades,
-              photo_url,
-              badges,
-              last_active,
-              is_verified
-            )
-          `)
+          .select("*")
           .eq("user_id", userId)
           .order("created_at", { ascending: false });
 
         if (result.error) {
           result = await supabase
             .from("ads")
-            .select(`
-              *,
-              user:profiles (
-                id,
-                username,
-                last_active
-              )
-            `)
+            .select("*")
             .eq("user_id", userId)
             .order("created_at", { ascending: false });
         }
@@ -103,7 +82,19 @@ export function MyPostedAdsSection({ userId }: { userId: string }) {
           console.error("Error loading user ads:", result.error);
           setAds([]);
         } else {
-          const normalized = (result.data || []).map(normalizeUserAd);
+          const { data: publicProfiles, error: profileError } = await supabase
+            .from("public_profiles")
+            .select("id, username, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avatar_url, photo_url, is_verified, is_online, merchant_tier")
+            .eq("id", userId)
+            .maybeSingle();
+
+          if (profileError) {
+            console.warn("Public trader profile is unavailable while loading owned ads:", profileError.code);
+          }
+
+          const normalized = (result.data || []).map((ad: any) =>
+            normalizeUserAd({ ...ad, user: publicProfiles || null })
+          );
           setAds(normalized);
         }
       } catch (err) {

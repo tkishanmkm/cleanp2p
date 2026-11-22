@@ -2,8 +2,8 @@ import { AuthForm } from '@/components/auth/auth-form';
 import { ModeToggle } from '@/components/mode-toggle';
 
 export const metadata = {
-  title: 'Login | Paxones',
-  description: 'Sign in to your Paxones account.',
+  title: 'Login',
+  description: 'Sign in to your Wayones account.',
 };
 
 export default function LoginPage() {

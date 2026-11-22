@@ -7,9 +7,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return auth.response!;
+    const auth = await verifyServerAdmin(req, { allowSupportReadOnly: true });
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
+      return NextResponse.json(
+        { success: false, error: 'Full administrator access is required to view platform-wide user block records.', blocks: [] },
+        { status: 403 }
+      );
     }
 
     const supabase = getSupabaseAdminClient();
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { blockId, blockerId, blockedId } = body;
 
-    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminEmail = auth.adminEmail || "admin@wayones.com";
     const adminId = auth.adminId || auth.user.id;
 
     if (!blockId && (!blockerId || !blockedId)) {

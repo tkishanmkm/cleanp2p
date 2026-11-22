@@ -7,12 +7,13 @@ import { startWithdrawalWorker, stopWithdrawalWorker } from './jobs/withdrawalWo
 import { checkHotWalletBalance } from './jobs/hotWalletMonitor';
 import { processExpiredP2PTrades } from './jobs/p2pExpiryWorker';
 import { runDepositSweeper } from './jobs/sweeperWorker';
+import { runDepositChainIntegrityMonitor } from './jobs/depositIntegrityWorker';
 import { runMarketPriceUpdate } from './jobs/priceUpdaterWorker';
 import { reconcileLedgerVsChain } from './jobs/reconciliationWorker';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from './lib/blockchain/providers';
 
 console.log('====================================================');
-console.log('  PAXONES CRYPTO & ESCROW BACKGROUND WORKER DAEMON  ');
+console.log('  Wayones CRYPTO & ESCROW BACKGROUND WORKER DAEMON  ');
 console.log('====================================================');
 
 interface WorkerState {
@@ -43,8 +44,9 @@ async function initializeDatabaseConnection(): Promise<boolean> {
     const { error } = await supabaseAdmin.from('profiles').select('id').limit(1);
     const latency = Date.now() - startTime;
 
-    if (error && error.code !== 'PGRST116') {
-      console.warn(`[Database] Connection notice (${latency}ms):`, error.message);
+    if (error) {
+      state.isDatabaseConnected = false;
+      throw new Error(`Database readiness check failed (${latency}ms, code=${error.code || 'unknown'}): ${error.message}`);
     }
 
     state.isDatabaseConnected = true;
@@ -163,7 +165,17 @@ function initializeScheduledJobs(): void {
     }
   });
 
-  // 6. Worker Health Heartbeat: every 5 minutes
+  // 6. Post-credit deposit chain integrity monitor: canonical block identity checks.
+  // This creates durable alerts for hash divergence only; it never reverses customer balances.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await runDepositChainIntegrityMonitor();
+    } catch (err: any) {
+      console.error('[Cron: Deposit Integrity Error]:', err?.message);
+    }
+  });
+
+  // 7. Worker Health Heartbeat: every 5 minutes
   cron.schedule('*/5 * * * *', () => {
     const memory = process.memoryUsage();
     console.log('[Worker Heartbeat]', {
@@ -202,8 +214,11 @@ function handleGracefulShutdown(signal: string): void {
  * Main Worker Entry Point
  */
 export async function startWorkerDaemon(): Promise<void> {
-  console.log('[Worker] Starting Paxones Background Daemon...');
-  await initializeDatabaseConnection();
+  console.log('[Worker] Starting Wayones Background Daemon...');
+  const databaseReady = await initializeDatabaseConnection();
+  if (!databaseReady) {
+    throw new Error('WORKER_STARTUP_ABORTED_DATABASE_NOT_READY');
+  }
   await initializeBlockchainListeners();
   initializeScheduledJobs();
   console.log('[Worker] All systems initialized and listening.');
@@ -224,6 +239,7 @@ if (typeof require !== 'undefined' && require.main === module && process.env.RUN
 
   startWorkerDaemon().catch((err) => {
     console.error('[Worker Fatal Startup Error]:', err);
+    process.exitCode = 1;
   });
 }
 

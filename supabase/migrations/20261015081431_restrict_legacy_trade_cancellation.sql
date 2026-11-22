@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.cancel_trade_and_release_escrow(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.cancel_trade_and_release_escrow(uuid, text) TO service_role;

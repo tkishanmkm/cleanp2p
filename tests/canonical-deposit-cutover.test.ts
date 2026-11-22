@@ -1,15 +1,6 @@
-import { config as loadDotenv } from 'dotenv';
-loadDotenv({ path: '.env.local' });
-import { createClient } from '@supabase/supabase-js';
+import { testSupabase as supabase } from './helpers/test-supabase';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 import { normalizeDepositNetwork } from '../src/lib/hd-derivation-engine';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // Formatting
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -424,7 +415,13 @@ async function runCanonicalCutoverTests() {
     console.log(bold(cyan('\n------------------------------------------------------')));
     console.log(bold(`Results: ${passed}/${total} scenarios passed.`));
     console.log(bold(cyan('------------------------------------------------------\n')));
+    if (passed !== total) {
+      process.exitCode = 1;
+    }
   }
 }
 
-runCanonicalCutoverTests();
+runCanonicalCutoverTests().catch((error) => {
+  console.error(red(`Canonical deposit cutover suite failed: ${error instanceof Error ? error.message : String(error)}`));
+  process.exitCode = 1;
+});

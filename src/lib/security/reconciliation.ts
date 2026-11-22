@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabaseService as supabaseAdmin } from '@/lib/supabase/service-role';
 import { ethers } from 'ethers';
 import {
   SUPPORTED_EVM_CHAINS,
@@ -9,16 +9,6 @@ import {
 } from '@/lib/blockchain/providers';
 import { getTronWeb, TRON_CONFIG, isValidTronAddress } from '@/lib/blockchain/tron';
 
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 export interface DiscrepancyAlert {
   walletId: string;
@@ -327,15 +317,15 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
     });
   }
 
-  // 5. Persist Critical Alerts in security_alerts
+  // 5. Persist critical alerts in the deployed system_alerts table.
   for (const anomaly of discrepancies) {
     try {
-      await supabaseAdmin.from('security_alerts').insert({
+      await supabaseAdmin.from('system_alerts').insert({
         alert_type: anomaly.anomalyType,
         severity: 'CRITICAL',
         title: `Financial Anomaly: ${anomaly.anomalyType}`,
         message: anomaly.details,
-        details: {
+        metadata: {
           wallet_id: anomaly.walletId,
           user_id: anomaly.userId,
           asset: anomaly.assetSymbol,

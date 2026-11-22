@@ -2,9 +2,9 @@
 export default function AboutPage() {
   return (
     <div className="prose dark:prose-invert max-w-4xl mx-auto">
-      <h1>About Paxones</h1>
+      <h1>About Wayones</h1>
       <p className="lead">
-        Paxones was founded on the principle that everyone deserves access to the digital economy. We are building a global peer-to-peer marketplace to empower individuals with financial freedom.
+        Wayones was founded on the principle that everyone deserves access to the digital economy. We are building a global peer-to-peer marketplace to empower individuals with financial freedom.
       </p>
 
       <h2>Our Mission</h2>

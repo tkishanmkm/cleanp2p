@@ -38,6 +38,7 @@ import {
 import { FlagIcon } from "@/components/ui/flag-icon";
 import { cn, toDate } from "@/lib/utils";
 import { usePrices } from "@/context/price-context";
+import { useI18n } from "@/context/i18n-context";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -53,6 +54,8 @@ const COIN_CONFIG: Record<ExtendedCoinOption, { label: string; fullName: string;
   USDT: { label: 'TETHER (USDT)', fullName: 'Tether', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30', textClass: 'text-emerald-300' },
   ETH: { label: 'Ethereum (ETH)', fullName: 'Ethereum', badgeClass: 'bg-purple-300/20 text-purple-200 border-purple-300/30', textClass: 'text-purple-200' },
   LTC: { label: 'Litecoin (LTC)', fullName: 'Litecoin', badgeClass: 'bg-sky-400/20 text-sky-200 border-sky-300/30', textClass: 'text-sky-200' },
+  BNB: { label: 'BNB (BNB)', fullName: 'BNB', badgeClass: 'bg-yellow-500/20 text-yellow-300 border-yellow-400/30', textClass: 'text-yellow-300' },
+  TRX: { label: 'TRON (TRX)', fullName: 'TRON', badgeClass: 'bg-red-500/20 text-red-300 border-red-400/30', textClass: 'text-red-300' },
 };
 
 const getCountryCodeForCurrency = (currencyCode: string): string => {
@@ -111,7 +114,10 @@ function normalizeAd(raw: any): P2PAd {
     tags: Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.offer_tags) ? raw.offer_tags : Array.isArray(raw.ad_tags) ? raw.ad_tags : [],
     terms: raw.terms_conditions || raw.terms || '',
     paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? raw.payment_window ?? raw.paymentWindow ?? raw.time_limit ?? 30),
-    active: raw.active !== false && raw.is_active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED' && raw.status !== 'draft' && raw.status !== 'DRAFT',
+    active: raw.active !== false &&
+      raw.is_active !== false &&
+      raw.is_deleted !== true &&
+      (!raw.status || String(raw.status).trim().toUpperCase() === 'ACTIVE'),
     targetedCountries: raw.targeted_countries || raw.targetedCountries || [],
     blockedCountries: raw.blocked_countries || raw.blockedCountries || [],
     minCompletedTrades: Number(raw.min_completed_trades ?? raw.minCompletedTrades ?? 0),
@@ -137,6 +143,23 @@ function P2PMarketplaceContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const { t, language } = useI18n();
+  const getPaymentCategoryLabel = (category: string) => {
+    const keyByCategory: Record<string, string> = {
+      'Bank Transfers': 'categoryBank', 'Online Wallets': 'categoryWallet', 'Mobile Money': 'categoryMobile',
+      'Cash Payments': 'categoryCash', 'Gift Cards': 'categoryGift',
+    };
+    const key = keyByCategory[category];
+    return key ? t('marketplacePage.' + key) : category;
+  };
+  const getOfferTagLabel = (tag: string) => {
+    const keyByTag: Record<string, string> = {
+      'Instant release': 'tagInstant', 'No receipt required': 'tagNoReceipt',
+      'No verification': 'tagNoVerification', 'Invoice accepted': 'tagInvoice',
+    };
+    const key = keyByTag[tag];
+    return key ? t('adForm.' + key) : tag;
+  };
 
   const isBuyPage = pathname.includes('/buy');
   const targetAdType = isBuyPage ? 'sell' : 'buy';
@@ -298,7 +321,7 @@ function P2PMarketplaceContent() {
     { category: 'Mobile Money', methods: mobileMoney, icon: Smartphone },
     { category: 'Cash Payments', methods: cashPayments, icon: Car },
     { category: 'Gift Cards', methods: giftCardPaymentMethods, icon: CreditCard },
-  ], []);
+  ], [t]);
 
   const fetchAds = useCallback(async () => {
     setIsLoading(true);
@@ -308,10 +331,19 @@ function P2PMarketplaceContent() {
         supabase.from('ads').select('*').order('created_at', { ascending: false }),
       ]);
 
-      const mapById = new Map<string, any>();
-      (p2pData || []).forEach((row: any) => { if (row?.id) mapById.set(row.id, row); });
-      (adsData || []).forEach((row: any) => { if (row?.id && !mapById.has(row.id)) mapById.set(row.id, row); });
-      const allRows = Array.from(mapById.values());
+      // The canonical ads row and its p2p_ads compatibility mirror have
+      // different primary keys but share public_ad_id. Prefer the canonical
+      // ads row and retain only p2p_ads records that have no canonical pair.
+      const rowsByPublicAdId = new Map<string, any>();
+      (adsData || []).forEach((row: any) => {
+        const key = String(row?.public_ad_id || row?.public_id || row?.id || '').trim();
+        if (key) rowsByPublicAdId.set(key, row);
+      });
+      (p2pData || []).forEach((row: any) => {
+        const key = String(row?.public_ad_id || row?.publicAdId || row?.id || '').trim();
+        if (key && !rowsByPublicAdId.has(key)) rowsByPublicAdId.set(key, row);
+      });
+      const allRows = Array.from(rowsByPublicAdId.values());
 
       const normalized = (allRows || [])
         .map(normalizeAd)
@@ -321,8 +353,8 @@ function P2PMarketplaceContent() {
       const creatorIds = Array.from(new Set(normalized.map((a) => a.userId).filter(Boolean)));
       if (creatorIds.length > 0) {
         const { data: profiles } = await supabase
-          .from('profiles')
-          .select('*')
+          .from('public_profiles')
+          .select('id, username, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, avatar_url, photo_url, created_at, is_verified, is_online')
           .in('id', creatorIds);
 
         if (profiles) {
@@ -340,90 +372,18 @@ function P2PMarketplaceContent() {
               photoURL: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
               avatar_url: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
               avatarUrl: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
-              badges: p.badges || [],
-              lastActive: p.last_seen || p.last_seen_at || p.last_active || p.updated_at,
-              last_seen: p.last_seen || p.last_seen_at || p.last_active,
-              last_seen_at: p.last_seen_at || p.last_seen || p.last_active,
+              badges: [] ,
+              lastActive: null,
+              last_seen: null,
+              last_seen_at: null,
+              isOnline: p.is_online === true,
               createdAt: p.created_at,
-              blockedUsers: p.blocked_users || [],
-              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED') ?? false,
-              cryptoBalances: {
-                BTC: Number(p.btc_balance || 0),
-                ETH: Number(p.eth_balance || 0),
-                USDT: Number(p.usdt_balance || 0),
-                LTC: Number(p.ltc_balance || 0),
-              },
+              blockedUsers: [],
+              isVerified: p.is_verified === true,
+              cryptoBalances: {},
             };
           });
-
-          // Fetch wallet_assets & user_wallets to get live available balances
-          try {
-            const [
-              { data: walletAssets },
-              { data: userWallets },
-              { data: chainWallets }
-            ] = await Promise.all([
-              supabase
-                .from('wallet_assets')
-                .select('*')
-                .in('user_id', creatorIds),
-              supabase
-                .from('user_wallets')
-                .select('user_id, asset_symbol, balance, locked_balance, available_balance')
-                .in('user_id', creatorIds),
-              supabase
-                .from('wallets')
-                .select('user_id, currency, chain, balance, available_balance')
-                .in('user_id', creatorIds),
-            ]);
-
-            if (walletAssets && walletAssets.length > 0) {
-              walletAssets.forEach((wa: any) => {
-                const uId = wa.user_id;
-                if (map[uId]) {
-                  const coin = String(wa.asset_symbol || wa.asset_code || wa.symbol || '').toUpperCase();
-                  const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-
-            if (userWallets && userWallets.length > 0) {
-              userWallets.forEach((w: any) => {
-                const uId = w.user_id;
-                if (map[uId]) {
-                  const coin = String(w.asset_symbol || '').toUpperCase();
-                  const avail = Number(
-                    w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0))
-                  );
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-
-            if (chainWallets && chainWallets.length > 0) {
-              chainWallets.forEach((cw: any) => {
-                const uId = cw.user_id;
-                if (map[uId]) {
-                  const coin = String(cw.currency || cw.chain || '').toUpperCase();
-                  const avail = Number(cw.available_balance ?? cw.balance ?? 0);
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-          } catch (wErr) {
-            console.warn('Wallet balance fetch warning in sell page:', wErr);
-          }
-
+          // Private wallet balances are never queried for public marketplace cards.
           setAdCreators(map);
         }
       }
@@ -588,41 +548,41 @@ function P2PMarketplaceContent() {
   const calculatedPrice = rawMarketPrice * fiatMultiplier;
 
   const marketPriceText = rawMarketPrice > 0
-    ? `1 ${activePriceCoin} = ${calculatedPrice.toLocaleString('en-US', { style: 'currency', currency: activeFiatCurrency, minimumFractionDigits: 2 })}`
-    : `1 ${activePriceCoin} = Fetching price...`;
+    ? `1 ${activePriceCoin} = ${calculatedPrice.toLocaleString(language, { style: 'currency', currency: activeFiatCurrency, minimumFractionDigits: 2 })}`
+    : `1 ${activePriceCoin} = ${t('marketplacePage.fetchingPrice')}`;
 
   const tourSteps = useMemo(() => [
     {
-      title: "Step 1: Action Selector",
+      title: t('marketplacePage.tourTitle1'),
       targetId: "tour-action-toggle",
-      content: "Toggle between Buy and Sell to view available market offers or create your own transaction listing.",
+      content: t('marketplacePage.tourBody1'),
     },
     {
-      title: "Step 2: Asset Choice",
+      title: t('marketplacePage.tourTitle2'),
       targetId: "tour-crypto-select",
-      content: "Select from Bitcoin, Tether, Ethereum, or Litecoin. Choose your currency with auto-calculated rates.",
+      content: t('marketplacePage.tourBody2'),
     },
     {
-      title: "Step 3: Filter Payment Methods",
+      title: t('marketplacePage.tourTitle3'),
       targetId: "tour-payment-select",
-      content: "Easily search through categories including Bank Transfers, Online Wallets, Mobile Money, and Gift Cards.",
+      content: t('marketplacePage.tourBody3'),
     },
     {
-      title: "Step 4: Advanced Filter Options",
+      title: t('marketplacePage.tourTitle4'),
       targetId: "tour-filter-btn",
-      content: "Refine offers by specific Country, ID-Verified traders, Top-Rated badges, and Recently Active users.",
+      content: t('marketplacePage.tourBody4'),
     },
     {
-      title: "Step 5: Post Your Offer",
+      title: t('marketplacePage.tourTitle5'),
       targetId: "tour-post-btn",
-      content: "Want to sell or buy on your custom terms? Click here to create your own P2P offer instantly.",
+      content: t('marketplacePage.tourBody5'),
     },
     {
-      title: "Step 6: Escrow Protected Trades",
+      title: t('marketplacePage.tourTitle6'),
       targetId: "tour-offers-list",
-      content: "Browse matched offers safely. All crypto funds are held securely in Escrow until payment is validated.",
+      content: t('marketplacePage.tourBody6'),
     }
-  ], []);
+  ], [t]);
 
   // Dynamically recalculate tooltip position next to target highlight element
   useEffect(() => {
@@ -638,7 +598,11 @@ function P2PMarketplaceContent() {
     }
   }, [tourStep, tourSteps]);
 
-  const currentCoinInfo = COIN_CONFIG[selectedCoin];
+  const currentCoinInfo = {
+    ...COIN_CONFIG[selectedCoin],
+    label: selectedCoin === 'ALL' ? t('marketplacePage.allCoins') : COIN_CONFIG[selectedCoin].label,
+    fullName: selectedCoin === 'ALL' ? t('marketplacePage.allCoins') : COIN_CONFIG[selectedCoin].fullName,
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-200">
@@ -649,7 +613,7 @@ function P2PMarketplaceContent() {
                 <div>
                     <div className="flex items-center gap-3">
                       <h1 className="text-2xl font-bold md:text-3xl tracking-tight">
-                        Sell <span className={cn("font-extrabold", currentCoinInfo.textClass)}>{currentCoinInfo.fullName}</span>
+                        {t('marketplacePage.sell')} <span className={cn("font-extrabold", currentCoinInfo.textClass)}>{currentCoinInfo.fullName}</span>
                       </h1>
                       <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full border", currentCoinInfo.badgeClass)}>
                         {selectedCoin}
@@ -667,14 +631,14 @@ function P2PMarketplaceContent() {
                       className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#6347ea] text-white hover:bg-[#5238d6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#6347ea]/50 active:scale-[0.98] cursor-pointer"
                     >
                       <Compass className="w-4 h-4" />
-                      <span>Take a tour</span>
+                      <span>{t('marketplacePage.takeTour')}</span>
                     </button>
                     <Link
                       href="/academy"
                       className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#6347ea] text-white hover:bg-[#5238d6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#6347ea]/50 active:scale-[0.98]"
                     >
                       <Compass className="w-4 h-4" />
-                      <span>Academy</span>
+                      <span>{t('marketplacePage.academy')}</span>
                     </Link>
                 </div>
             </div>
@@ -696,14 +660,14 @@ function P2PMarketplaceContent() {
                           onClick={() => handleToggle('buy')} 
                           className={cn('flex-1 text-xs font-semibold px-4 transition-all', isBuyPage ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-md' : 'bg-transparent text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white')}
                         >
-                            <ArrowDown className="mr-1 h-3.5 w-3.5" /> Buy
+                            <ArrowDown className="mr-1 h-3.5 w-3.5" /> {t('marketplacePage.buy')}
                         </Button>
                         <Button 
                           size="sm" 
                           onClick={() => handleToggle('sell')} 
                           className={cn('flex-1 text-xs font-semibold px-4 transition-all', !isBuyPage ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-md' : 'bg-transparent text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white')}
                         >
-                            <ArrowUp className="mr-1 h-3.5 w-3.5" /> Sell
+                            <ArrowUp className="mr-1 h-3.5 w-3.5" /> {t('marketplacePage.sell')}
                         </Button>
                     </div>
 
@@ -718,7 +682,7 @@ function P2PMarketplaceContent() {
                                   <div className="flex items-center gap-2">
                                       <CryptoLogo crypto={selectedCoin} className="h-5 w-5 text-slate-700 dark:text-white" />
                                       <span className="font-medium text-slate-900 dark:text-white">
-                                        {COIN_CONFIG[selectedCoin].label}
+                                        {currentCoinInfo.label}
                                       </span>
                                   </div>
                               </SelectValue>
@@ -727,7 +691,7 @@ function P2PMarketplaceContent() {
                               <SelectItem value="ALL">
                                 <div className="flex items-center gap-2">
                                   <Wallet className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                                  <span>All Coins</span>
+                                  <span>{t('marketplacePage.allCoins')}</span>
                                 </div>
                               </SelectItem>
                               <SelectItem value="BTC">
@@ -761,7 +725,7 @@ function P2PMarketplaceContent() {
                     {/* Amount & Fiat Input with Correct Dynamic Flag Icons */}
                     <div className="relative flex items-center flex-1 min-w-[200px]">
                         <Input 
-                          placeholder="Amount" 
+                          placeholder={t('marketplacePage.amountPlaceholder')}
                           value={amount} 
                           onChange={(e) => setAmount(e.target.value)} 
                           className="h-10 pl-3 pr-28 bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
@@ -789,7 +753,7 @@ function P2PMarketplaceContent() {
                         className="h-10 w-full flex justify-between items-center text-left font-normal bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-700" 
                         onClick={() => setIsPaymentModalOpen(true)}
                       >
-                          <span className="truncate">{paymentMethod || 'All Payment Methods'}</span>
+                          <span className="truncate">{paymentMethod || t('marketplacePage.allPaymentMethods')}</span>
                           <ChevronDown className="h-4 w-4 opacity-60 flex-shrink-0 ml-2" />
                       </Button>
                     </div>
@@ -801,7 +765,7 @@ function P2PMarketplaceContent() {
                           asChild 
                           className={cn("bg-emerald-500 hover:bg-emerald-400 text-white border-0 shadow-md font-semibold transition-all duration-300", tourStep === 4 && "ring-4 ring-amber-400 scale-105 shadow-2xl z-50")}
                         >
-                            <Link href="/ads/create"><PlusCircle className="mr-2 h-4 w-4" /> Post Offer</Link>
+                            <Link href="/ads/create"><PlusCircle className="mr-2 h-4 w-4" /> {t('marketplacePage.postOffer')}</Link>
                         </Button>
                         <Button 
                           id="tour-filter-btn"
@@ -836,11 +800,11 @@ function P2PMarketplaceContent() {
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>
-                  <strong>Tier 1 Account:</strong> KYC verification (Tier 2) is required to sell cryptocurrency.
+                  {t('marketplacePage.tier1SellNotice')}
                 </span>
               </div>
               <Link href="/settings" className="text-amber-600 dark:text-amber-400 font-semibold underline hover:opacity-80 shrink-0">
-                Verify Identity in Settings &rarr;
+                {t('marketplacePage.verifyIdentityInSettings')} &rarr;
               </Link>
             </div>
           )}
@@ -848,20 +812,20 @@ function P2PMarketplaceContent() {
           <div className="flex justify-between items-center mb-6 border-b border-border pb-4">
               <div>
                 <h2 className="text-xl font-bold text-foreground">
-                  Available Offers to Sell {currentCoinInfo.fullName}
+                  {t('marketplacePage.availableOffersSell').replace('{coin}', currentCoinInfo.fullName)}
                 </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Showing live competitive rates from verified buyers</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{t('marketplacePage.showingRatesSell')}</p>
               </div>
               <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground hidden sm:inline">Sort:</span>
+                  <span className="text-xs text-muted-foreground hidden sm:inline">{t('marketplacePage.sort')}</span>
                   <Select value={sortBy} onValueChange={setSortBy}>
                     <SelectTrigger className="w-[130px] h-8 text-xs bg-background border-input">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="price">Best Price</SelectItem>
-                      <SelectItem value="rating">User Rating</SelectItem>
-                      <SelectItem value="popular">Most Trades</SelectItem>
+                      <SelectItem value="price">{t('marketplacePage.bestPrice')}</SelectItem>
+                      <SelectItem value="rating">{t('marketplacePage.userRating')}</SelectItem>
+                      <SelectItem value="popular">{t('marketplacePage.mostTrades')}</SelectItem>
                     </SelectContent>
                   </Select>
               </div>
@@ -883,12 +847,12 @@ function P2PMarketplaceContent() {
               {!isLoading && (!filteredAds || filteredAds.length === 0) && (
                   <div className="text-center py-16 border-2 border-dashed border-border rounded-xl bg-muted/20">
                       <Wallet className="mx-auto h-12 w-12 text-muted-foreground" />
-                      <h3 className="mt-4 text-lg font-semibold text-foreground">No Offers Found</h3>
+                      <h3 className="mt-4 text-lg font-semibold text-foreground">{t('marketplacePage.noOffersFound')}</h3>
                       <p className="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
-                        No active trade offers match your search criteria. Try relaxing your payment or amount filters.
+                        {t('marketplacePage.noActiveOffers')}
                       </p>
                       <Button variant="outline" className="mt-4" onClick={handleResetFilters}>
-                        Reset All Filters
+                        {t('marketplacePage.resetAllFilters')}
                       </Button>
                   </div>
               )}
@@ -899,59 +863,59 @@ function P2PMarketplaceContent() {
         <div className="my-12 bg-card border border-border rounded-xl p-6 sm:p-8 space-y-6 shadow-sm">
             <div className="border-b border-border pb-4">
               <h2 className="text-2xl font-bold text-foreground">
-                How to Sell {currentCoinInfo.fullName}
+                {t('marketplacePage.sellGuideTitle').replace('{coin}', currentCoinInfo.fullName)}
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Follow our step-by-step guide to sell your cryptocurrency safely using Escrow protection.
+                {t('marketplacePage.sellGuideSubtitle')}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 1</span>
-                <h3 className="font-semibold text-base text-foreground">Sign in & Fund Wallet</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '1')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep1Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Log in to your account and make sure your wallet is funded with crypto to sell.
+                  {t('marketplacePage.sellGuideStep1Body')}
                 </p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 2</span>
-                <h3 className="font-semibold text-base text-foreground">Filter Buyer Offers</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '2')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep2Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Select your desired payout method (Bank Transfer, Mobile Money, Cash) and currency to find matching buyer offers.
+                  {t('marketplacePage.sellGuideStep2Body')}
                 </p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 3</span>
-                <h3 className="font-semibold text-base text-foreground">Check Buyer Reputation</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '3')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep3Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Review the buyer's positive feedback score, completed trade count, and identity verification badge.
+                  {t('marketplacePage.sellGuideStep3Body')}
                 </p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 4</span>
-                <h3 className="font-semibold text-base text-foreground">Lock in Escrow</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '4')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep4Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Start the trade. Your crypto is safely locked in Escrow and cannot be claimed until you confirm receipt of payment.
+                  {t('marketplacePage.sellGuideStep4Body')}
                 </p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 5</span>
-                <h3 className="font-semibold text-base text-foreground">Verify Incoming Payment</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '5')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep5Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Verify the funds directly in your bank account, mobile money app, or wallet before releasing the crypto.
+                  {t('marketplacePage.sellGuideStep5Body')}
                 </p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-muted/40 border border-border">
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Step 6</span>
-                <h3 className="font-semibold text-base text-foreground">Release Crypto</h3>
+                <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{t('marketplacePage.guideStepLabel').replace('{step}', '6')}</span>
+                <h3 className="font-semibold text-base text-foreground">{t('marketplacePage.sellGuideStep6Title')}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Once payment is received in full, hit "Release Crypto" to deliver the coins to the buyer and leave positive feedback.
+                  {t('marketplacePage.sellGuideStep6Body')}
                 </p>
               </div>
             </div>
@@ -960,27 +924,27 @@ function P2PMarketplaceContent() {
         {/* FAQs */}
         <div className="mb-16 bg-card border border-border rounded-xl p-6 sm:p-8 shadow-sm">
             <div className="mb-6">
-              <h2 className="text-2xl font-bold text-foreground">Frequently Asked Questions</h2>
-              <p className="text-sm text-muted-foreground mt-1">Find answers to popular questions asked by P2P sellers.</p>
+              <h2 className="text-2xl font-bold text-foreground">{t('marketplacePage.sellFaqTitle')}</h2>
+              <p className="text-sm text-muted-foreground mt-1">{t('marketplacePage.sellFaqSubtitle')}</p>
             </div>
 
             <Accordion type="single" collapsible className="w-full space-y-2">
               <AccordionItem value="faq-1" className="border-border">
-                <AccordionTrigger className="text-foreground font-semibold">How do I get paid when selling crypto?</AccordionTrigger>
+                <AccordionTrigger className="text-foreground font-semibold">{t('marketplacePage.sellFaqQ1')}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground text-sm leading-relaxed">
-                  The buyer sends funds directly to your chosen payment account (Bank account, PayPal, Wise, Mobile Money, etc.) based on your trade terms.
+                  {t('marketplacePage.sellFaqA1')}
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="faq-2" className="border-border">
-                <AccordionTrigger className="text-foreground font-semibold">When should I release the crypto from Escrow?</AccordionTrigger>
+                <AccordionTrigger className="text-foreground font-semibold">{t('marketplacePage.sellFaqQ2')}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground text-sm leading-relaxed">
-                  Only release crypto after logging into your bank or payment account and confirming the exact fiat payment has settled. Never release based on payment screenshots alone.
+                  {t('marketplacePage.sellFaqA2')}
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="faq-3" className="border-border">
-                <AccordionTrigger className="text-foreground font-semibold">What happens if the buyer marks as paid but hasn't sent funds?</AccordionTrigger>
+                <AccordionTrigger className="text-foreground font-semibold">{t('marketplacePage.sellFaqQ3')}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground text-sm leading-relaxed">
-                  Do not release the escrow. You can open a Dispute after the timer runs down, and our moderation team will review proof and resolve the trade.
+                  {t('marketplacePage.sellFaqA3')}
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
@@ -991,12 +955,12 @@ function P2PMarketplaceContent() {
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
         <DialogContent className="max-w-md bg-background border-border text-foreground">
           <DialogHeader>
-            <DialogTitle className="text-foreground">Select Payment Method</DialogTitle>
+            <DialogTitle className="text-foreground">{t('marketplacePage.selectPaymentMethod')}</DialogTitle>
           </DialogHeader>
           <div className="relative my-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
-              placeholder="Search methods..." 
+              placeholder={t('marketplacePage.searchMethods')}
               value={paymentSearch} 
               onChange={(e) => setPaymentSearch(e.target.value)} 
               className="pl-10 bg-background border-input" 
@@ -1009,7 +973,7 @@ function P2PMarketplaceContent() {
                 className="w-full justify-start text-foreground font-semibold" 
                 onClick={() => { setPaymentMethod(''); setIsPaymentModalOpen(false); }}
               >
-                All Payment Methods
+                {t('marketplacePage.allPaymentMethods')}
               </Button>
               {allPaymentCategories.map(({ category, methods, icon: Icon }) => {
                 const filtered = methods.filter(m => m.toLowerCase().includes(paymentSearch.toLowerCase()));
@@ -1018,7 +982,7 @@ function P2PMarketplaceContent() {
                   <Accordion type="single" collapsible key={category}>
                     <AccordionItem value={category} className="border-b border-border">
                       <AccordionTrigger className="hover:no-underline text-foreground text-sm py-2.5">
-                        <div className="flex items-center"><Icon className="mr-2 h-4 w-4 text-primary" />{category}</div>
+                        <div className="flex items-center"><Icon className="mr-2 h-4 w-4 text-primary" />{getPaymentCategoryLabel(category)}</div>
                       </AccordionTrigger>
                       <AccordionContent className="pl-4 space-y-1">
                         {filtered.map(method => (
@@ -1045,12 +1009,12 @@ function P2PMarketplaceContent() {
       <Dialog open={isFiatModalOpen} onOpenChange={setIsFiatModalOpen}>
         <DialogContent className="max-w-md bg-background border-border text-foreground">
           <DialogHeader>
-            <DialogTitle className="text-foreground">Select Currency</DialogTitle>
+            <DialogTitle className="text-foreground">{t('marketplacePage.selectCurrency')}</DialogTitle>
           </DialogHeader>
           <div className="relative my-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
-              placeholder="Search currency code or name..." 
+              placeholder={t('marketplacePage.searchCurrency')}
               value={fiatSearch} 
               onChange={(e) => setFiatSearch(e.target.value)} 
               className="pl-10 bg-background border-input" 
@@ -1065,7 +1029,7 @@ function P2PMarketplaceContent() {
               >
                 <div className="flex items-center gap-3">
                   <Globe className="h-4 w-4 text-primary flex-shrink-0" />
-                  <span className="text-sm font-semibold">All Currencies</span>
+                  <span className="text-sm font-semibold">{t('marketplacePage.allCurrencies')}</span>
                 </div>
                 <span className="font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">ALL</span>
               </Button>
@@ -1095,12 +1059,12 @@ function P2PMarketplaceContent() {
       <Dialog open={isFiltersDialogOpen} onOpenChange={setIsFiltersDialogOpen}>
         <DialogContent className="max-w-lg bg-background border-border text-foreground">
             <DialogHeader className="flex flex-row items-center justify-between border-b border-border pb-3">
-                <DialogTitle className="text-foreground text-lg font-bold">Filter Offers</DialogTitle>
-                <Button variant="ghost" size="sm" onClick={handleResetFilters} className="text-xs h-8">Reset All</Button>
+                <DialogTitle className="text-foreground text-lg font-bold">{t('marketplacePage.filterOffers')}</DialogTitle>
+                <Button variant="ghost" size="sm" onClick={handleResetFilters} className="text-xs h-8">{t('marketplacePage.resetAll')}</Button>
             </DialogHeader>
             <div className="py-2 space-y-5 max-h-[75vh] overflow-y-auto pr-1">
                 <div className="space-y-3">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Location & Tag</Label>
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t('marketplacePage.locationAndTag')}</Label>
                     <Button 
                       type="button" 
                       variant="outline" 
@@ -1109,7 +1073,7 @@ function P2PMarketplaceContent() {
                     >
                         <span className="flex items-center gap-2">
                           {selectedCountry && <FlagIcon countryCode={selectedCountry} className="h-4 w-4" />}
-                          {selectedCountry ? countries.find(c=>c.code === selectedCountry)?.name : 'Filter by Country'}
+                          {selectedCountry ? countries.find(c=>c.code === selectedCountry)?.name : t('marketplacePage.filterByCountry')}
                         </span>
                         <Globe className="h-4 w-4 text-muted-foreground" />
                     </Button>
@@ -1118,18 +1082,18 @@ function P2PMarketplaceContent() {
                       className="w-full justify-between bg-background border-input"
                       onClick={() => { setIsFiltersDialogOpen(false); setIsOfferTagsDialogOpen(true); }}
                     >
-                        <span>Offer Tags ({selectedTags.length})</span>
+                        <span>{t('marketplacePage.offerTags').replace('{count}', String(selectedTags.length))}</span>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </Button>
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-border">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Trader Badges & Status</Label>
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t('marketplacePage.traderBadgesStatus')}</Label>
                     
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label htmlFor="top-rated-switch" className="cursor-pointer font-semibold text-sm">Top-Rated Traders</Label>
-                            <p className="text-xs text-muted-foreground">Experienced traders with badges</p>
+                            <Label htmlFor="top-rated-switch" className="cursor-pointer font-semibold text-sm">{t('marketplacePage.topRatedTraders')}</Label>
+                            <p className="text-xs text-muted-foreground">{t('marketplacePage.experiencedTraders')}</p>
                         </div>
                         <Switch id="top-rated-switch" checked={showTopRated} onCheckedChange={setShowTopRated} />
                     </div>
@@ -1137,9 +1101,9 @@ function P2PMarketplaceContent() {
                     <div className="flex items-center justify-between">
                         <div>
                             <Label htmlFor="verified-switch" className="cursor-pointer font-semibold text-sm flex items-center gap-1">
-                              <ShieldCheck className="h-4 w-4 text-emerald-500" /> Verified Users Only
+                              <ShieldCheck className="h-4 w-4 text-emerald-500" /> {t('marketplacePage.verifiedUsersOnly')}
                             </Label>
-                            <p className="text-xs text-muted-foreground">Show offers from ID-verified users</p>
+                            <p className="text-xs text-muted-foreground">{t('marketplacePage.showIdVerified')}</p>
                         </div>
                         <Switch id="verified-switch" checked={showVerifiedOnly} onCheckedChange={setShowVerifiedOnly} />
                     </div>
@@ -1147,17 +1111,17 @@ function P2PMarketplaceContent() {
                     <div className="flex items-center justify-between">
                         <div>
                             <Label htmlFor="active-switch" className="cursor-pointer font-semibold text-sm flex items-center gap-1">
-                              <Clock className="h-4 w-4 text-amber-500" /> Recently Active
+                              <Clock className="h-4 w-4 text-amber-500" /> {t('marketplacePage.recentlyActive')}
                             </Label>
-                            <p className="text-xs text-muted-foreground">Traders active in last 30 mins</p>
+                            <p className="text-xs text-muted-foreground">{t('marketplacePage.tradersLast30Minutes')}</p>
                         </div>
                         <Switch id="active-switch" checked={showRecentlyActive} onCheckedChange={setShowRecentlyActive} />
                     </div>
 
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label htmlFor="acceptable-switch" className="cursor-pointer font-semibold text-sm">Acceptable Only</Label>
-                            <p className="text-xs text-muted-foreground">Offers matching your wallet & limits</p>
+                            <Label htmlFor="acceptable-switch" className="cursor-pointer font-semibold text-sm">{t('marketplacePage.acceptableOnly')}</Label>
+                            <p className="text-xs text-muted-foreground">{t('marketplacePage.offersMatchWallet')}</p>
                         </div>
                         <Switch id="acceptable-switch" checked={showAcceptable} onCheckedChange={setShowAcceptable} />
                     </div>
@@ -1170,10 +1134,10 @@ function P2PMarketplaceContent() {
                           checked={rememberFilters} 
                           onCheckedChange={(checked) => setRememberFilters(!!checked)} 
                         />
-                        <Label htmlFor="remember-filters" className="text-xs cursor-pointer">Remember my filters for next visit</Label>
+                        <Label htmlFor="remember-filters" className="text-xs cursor-pointer">{t('marketplacePage.rememberFilters')}</Label>
                     </div>
                     <Button className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white font-semibold" onClick={() => setIsFiltersDialogOpen(false)}>
-                      Apply Filters
+                      {t('marketplacePage.applyFilters')}
                     </Button>
                 </div>
             </div>
@@ -1184,7 +1148,7 @@ function P2PMarketplaceContent() {
       <Dialog open={isOfferTagsDialogOpen} onOpenChange={setIsOfferTagsDialogOpen}>
         <DialogContent className="max-w-md bg-background border-border text-foreground">
             <DialogHeader>
-                <DialogTitle className="text-foreground">Filter by Offer Tags</DialogTitle>
+                <DialogTitle className="text-foreground">{t('marketplacePage.filterByOfferTags')}</DialogTitle>
             </DialogHeader>
             <div className="py-2 space-y-2 max-h-[350px] overflow-y-auto pr-1">
                 {AD_TAGS.map((tag) => (
@@ -1198,12 +1162,12 @@ function P2PMarketplaceContent() {
                                 : setSelectedTags(selectedTags.filter(t => t !== tag))
                             }}
                         />
-                        <Label htmlFor={`tag-${tag}`} className="font-normal cursor-pointer w-full text-foreground">{tag}</Label>
+                        <Label htmlFor={`tag-${tag}`} className="font-normal cursor-pointer w-full text-foreground">{getOfferTagLabel(tag)}</Label>
                     </div>
                 ))}
             </div>
             <div className="pt-3 border-t border-border">
-                <Button onClick={() => setIsOfferTagsDialogOpen(false)} className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white font-semibold">Done</Button>
+                <Button onClick={() => setIsOfferTagsDialogOpen(false)} className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white font-semibold">{t('marketplacePage.done')}</Button>
             </div>
         </DialogContent>
       </Dialog>
@@ -1212,16 +1176,16 @@ function P2PMarketplaceContent() {
       <Dialog open={isCountryDialogOpen} onOpenChange={setIsCountryDialogOpen}>
         <DialogContent className="max-w-md bg-background border-border text-foreground">
             <DialogHeader>
-              <DialogTitle className="text-foreground">Select Country</DialogTitle>
+              <DialogTitle className="text-foreground">{t('marketplacePage.selectCountry')}</DialogTitle>
             </DialogHeader>
             <div className="relative my-2">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search country..." value={countrySearch} onChange={(e) => setCountrySearch(e.target.value)} className="pl-10 bg-background border-input" />
+                <Input placeholder={t('marketplacePage.searchCountry')} value={countrySearch} onChange={(e) => setCountrySearch(e.target.value)} className="pl-10 bg-background border-input" />
             </div>
             <ScrollArea className="max-h-[350px] pr-2">
                 <div className="space-y-1">
                     <Button variant="ghost" className="w-full justify-start text-foreground" onClick={() => { setSelectedCountry(''); setIsCountryDialogOpen(false); }}>
-                      <Globe className="h-4 w-4 mr-2 text-muted-foreground" /> All Countries
+                      <Globe className="h-4 w-4 mr-2 text-muted-foreground" /> {t('marketplacePage.allCountries')}
                     </Button>
                     {filteredCountries.map(country => (
                         <Button 
@@ -1253,12 +1217,12 @@ function P2PMarketplaceContent() {
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <span className="text-xs font-bold text-white bg-[#6347ea] px-2.5 py-0.5 rounded-full">
-                Step {tourStep + 1} of {tourSteps.length}
+                {t('marketplacePage.stepOf').replace('{step}', String(tourStep + 1)).replace('{total}', String(tourSteps.length))}
               </span>
               <button 
                 onClick={() => setTourStep(null)}
                 className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1 rounded-md transition-colors"
-                aria-label="Exit tour"
+                aria-label={t('marketplacePage.exitTour')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1277,15 +1241,15 @@ function P2PMarketplaceContent() {
                 onClick={() => setTourStep(prev => (prev !== null && prev > 0 ? prev - 1 : prev))}
                 className="h-8 text-xs border-slate-300 dark:border-slate-700"
               >
-                Previous
+                {t('marketplacePage.previous')}
               </Button>
               {tourStep < tourSteps.length - 1 ? (
                 <Button size="sm" className="bg-[#6347ea] hover:bg-[#5238d6] text-white h-8 text-xs font-semibold" onClick={() => setTourStep(prev => (prev !== null ? prev + 1 : prev))}>
-                  Next Step
+                  {t('marketplacePage.nextStep')}
                 </Button>
               ) : (
                 <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white h-8 text-xs font-semibold" onClick={() => setTourStep(null)}>
-                  <Check className="mr-1 h-3.5 w-3.5" /> Complete Tour
+                  <Check className="mr-1 h-3.5 w-3.5" /> {t('marketplacePage.completeTour')}
                 </Button>
               )}
             </div>

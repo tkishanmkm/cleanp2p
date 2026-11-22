@@ -127,11 +127,9 @@ BEGIN
             'USDT'
         ));
 
-        v_ad_price := COALESCE(
-            NULLIF(p_price, 0),
-            v_p2p_ad.price,
-            1.0
-        );
+        -- Never trust the caller-supplied p_price in this SECURITY DEFINER RPC.
+        -- The selected database ad row is the pricing source of truth.
+        v_ad_price := COALESCE(v_p2p_ad.price, 0);
 
         v_ad_fiat_currency := UPPER(COALESCE(
             NULLIF(p_fiat_currency, ''),
@@ -191,12 +189,13 @@ BEGIN
                 'USDT'
             ));
 
+            -- Never trust the caller-supplied p_price in this SECURITY DEFINER RPC.
+            -- Prefer the stored listing price and fail closed if no positive price exists.
             v_ad_price := COALESCE(
-                NULLIF(p_price, 0),
-                v_legacy_ad.price,
-                v_legacy_ad.unit_price,
-                v_legacy_ad.fixed_rate,
-                1.0
+                NULLIF(v_legacy_ad.price, 0),
+                NULLIF(v_legacy_ad.unit_price, 0),
+                NULLIF(v_legacy_ad.fixed_rate, 0),
+                0
             );
 
             v_ad_fiat_currency := UPPER(COALESCE(
@@ -236,14 +235,45 @@ BEGIN
         RAISE EXCEPTION 'You cannot trade with your own advertisement.';
     END IF;
 
+    -- Enforce account eligibility inside the SECURITY DEFINER RPC itself.
+    -- API-route checks are not sufficient because authenticated users can call this RPC directly.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.profiles p
+        WHERE p.id = v_effective_caller
+          AND NOT COALESCE(p.is_banned, false)
+          AND NOT COALESCE(p.is_restricted, false)
+          AND NOT COALESCE(p.is_suspended, false)
+          AND LOWER(COALESCE(p.status::text, '')) NOT IN ('banned', 'restricted', 'suspended', 'deleted')
+          AND UPPER(COALESCE(p.account_status, '')) NOT IN ('BANNED', 'RESTRICTED', 'SUSPENDED', 'DELETION_PENDING', 'DELETED')
+    ) THEN
+        RAISE EXCEPTION 'This account is not allowed to initiate trades.'
+            USING ERRCODE = '42501', DETAIL = 'ACCOUNT_TRADE_ACCESS_BLOCKED';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.profiles p
+        WHERE p.id = v_ad_user_id
+          AND NOT COALESCE(p.is_banned, false)
+          AND NOT COALESCE(p.is_restricted, false)
+          AND NOT COALESCE(p.is_suspended, false)
+          AND LOWER(COALESCE(p.status::text, '')) NOT IN ('banned', 'restricted', 'suspended', 'deleted')
+          AND UPPER(COALESCE(p.account_status, '')) NOT IN ('BANNED', 'RESTRICTED', 'SUSPENDED', 'DELETION_PENDING', 'DELETED')
+    ) THEN
+        RAISE EXCEPTION 'The advertisement owner account is not eligible for trading.'
+            USING ERRCODE = '42501', DETAIL = 'AD_OWNER_TRADE_ACCESS_BLOCKED';
+    END IF;
+
     -- Bounded Payment Window
     IF v_ad_payment_window_mins < 15 OR v_ad_payment_window_mins > 360 THEN
         v_ad_payment_window_mins := 30;
     END IF;
 
-    -- Positive Price Check
-    IF v_ad_price <= 0 THEN
-        v_ad_price := 1.0;
+    -- Fail closed on an invalid stored listing price; never substitute a fabricated price.
+    IF v_ad_price IS NULL OR v_ad_price <= 0 THEN
+        RAISE EXCEPTION 'Advertisement has no valid positive stored price.'
+            USING ERRCODE = '22023', DETAIL = 'INVALID_AD_PRICE';
     END IF;
 
     -- 5. Determine Trade Counterparties based on Normalized Ad Type

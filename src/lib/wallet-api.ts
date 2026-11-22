@@ -1,5 +1,5 @@
 import { InitiateTradePayload } from './types';
-import { createClient } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 
 export async function initiateTrade(payload: InitiateTradePayload): Promise<string> {
   const supabase = createClient();

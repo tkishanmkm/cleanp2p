@@ -1,48 +1,44 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { ADMIN_2FA_COOKIE_NAME, verifyAdmin2FASessionToken } from '@/lib/admin-2fa-session';
-import { USER_2FA_COOKIE_NAME, verifyUser2FASessionToken } from '@/lib/user-2fa-session';
+import {
+  ADMIN_2FA_COOKIE_NAME,
+  USER_2FA_COOKIE_NAME,
+  verifyAdmin2FASessionTokenEdge,
+  verifyUser2FASessionTokenEdge,
+} from '@/lib/2fa-session-edge';
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const pathname = request.nextUrl.pathname;
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  const isMachineAuthenticatedApi =
-    pathname.startsWith('/api/webhooks/') ||
-    pathname.startsWith('/api/cron/') ||
-    pathname.startsWith('/api/didit/webhook') ||
-    pathname.startsWith('/api/kyc/webhook');
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const isProtectedPage =
-    pathname.startsWith('/dashboard') ||
-    pathname.startsWith('/adminnarayan') ||
-    pathname.startsWith('/wallet') ||
-    pathname.startsWith('/trade') ||
-    pathname.startsWith('/buy') ||
-    pathname.startsWith('/sell') ||
-    pathname.startsWith('/transfer') ||
-    pathname.startsWith('/settings') ||
-    pathname.startsWith('/profile');
-
-  if (!supabaseUrl || !supabaseKey) {
-    if (isMachineAuthenticatedApi) return NextResponse.next();
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
-    }
-    const isPublicAuthPage =
+  // Never send auth requests to placeholder hosts when local configuration is absent.
+  // Public entry pages can render, but protected pages/APIs fail closed until configured.
+  if (
+    !supabaseUrl ||
+    !supabaseKey ||
+    /placeholder|your[_-]?project|your[_-]?anon[_-]?key/i.test(supabaseUrl + ' ' + supabaseKey)
+  ) {
+    const pathname = request.nextUrl.pathname;
+    const isStaticAsset =
+      pathname.startsWith('/_next/') ||
+      pathname.startsWith('/static/') ||
+      /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|woff2?)$/i.test(pathname);
+    const isPublicEntry =
       pathname === '/' ||
       pathname.startsWith('/login') ||
-      pathname.startsWith('/register') ||
-      pathname.startsWith('/auth') ||
-      pathname.startsWith('/adminnarayan/login');
-    if (isPublicAuthPage || !isProtectedPage) return NextResponse.next();
+      pathname.startsWith('/signup') ||
+      pathname.startsWith('/auth');
 
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = pathname.startsWith('/adminnarayan') ? '/adminnarayan/login' : '/login';
-    redirectUrl.searchParams.set('error', 'auth_unavailable');
-    return NextResponse.redirect(redirectUrl);
+    if (isStaticAsset || isPublicEntry) {
+      return supabaseResponse;
+    }
+
+    return NextResponse.json(
+      { error: 'Authentication service is not configured. Configure Supabase environment variables before accessing protected routes.', code: 'AUTH_SERVICE_NOT_CONFIGURED' },
+      { status: 503 }
+    );
   }
 
   try {
@@ -76,16 +72,122 @@ export async function middleware(request: NextRequest) {
 
     const url = request.nextUrl.clone();
 
-    // Check if user is banned across protected dashboard/wallet routes
-    if (user && !url.pathname.startsWith('/dashboard/banned') && !url.pathname.startsWith('/api/')) {
-      const { data: bannedCheck } = await supabase
+    // Enforce account lifecycle status on protected pages and APIs, not only in the UI.
+    // Public profile pages remain reachable so visitors can see a deleted/banned/restricted tombstone.
+    const isPublicAccountRoute =
+      url.pathname === '/login' ||
+      url.pathname.startsWith('/login/') ||
+      url.pathname === '/signup' ||
+      url.pathname.startsWith('/signup/') ||
+      url.pathname.startsWith('/api/cron/') ||
+      url.pathname.startsWith('/api/webhooks/') ||
+      url.pathname.startsWith('/api/didit/webhook') ||
+      url.pathname.startsWith('/api/kyc/webhook') ||
+      url.pathname.startsWith('/users/') ||
+      url.pathname.startsWith('/user/') ||
+      url.pathname.startsWith('/support') ||
+      url.pathname.startsWith('/contact') ||
+      url.pathname.startsWith('/_next/') ||
+      url.pathname.startsWith('/static/') ||
+      url.pathname === '/robots.txt' ||
+      url.pathname === '/sitemap.xml';
+
+    if (user && !isPublicAccountRoute && !url.pathname.startsWith('/dashboard/banned')) {
+      const { data: accountState, error: accountStateError } = await supabase
         .from('profiles')
-        .select('is_banned, status')
+        .select('is_banned, is_suspended, is_restricted, is_on_hold, is_emergency_frozen, is_minor_restricted, status, account_status')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (bannedCheck && (bannedCheck.is_banned || bannedCheck.status === 'banned')) {
+      if (accountStateError || !accountState) {
+        if (url.pathname.startsWith('/api/')) {
+          return NextResponse.json(
+            { error: 'Account status could not be verified. Please retry.', code: 'ACCOUNT_STATUS_UNAVAILABLE' },
+            { status: 503 }
+          );
+        }
+        url.pathname = '/login';
+        url.searchParams.set('error', 'account_status_unavailable');
+        return NextResponse.redirect(url);
+      }
+
+      const status = String(accountState.status || '').toLowerCase();
+      const accountStatus = String(accountState.account_status || '').toUpperCase();
+      const isDeletionPending = accountStatus === 'DELETION_PENDING';
+      const isDeleted = accountStatus === 'DELETED' || status === 'deleted';
+      const isBanned = accountState.is_banned === true || status === 'banned' || accountStatus === 'BANNED';
+      const isSuspended = accountState.is_suspended === true || status === 'suspended' || accountStatus === 'SUSPENDED';
+      const isRestricted =
+        accountState.is_restricted === true ||
+        status === 'restricted' ||
+        accountStatus === 'RESTRICTED';
+      const isOnHold =
+        accountState.is_on_hold === true ||
+        ['ON_HOLD', 'HOLD', 'BLOCKED'].includes(accountStatus);
+      const isEmergencyFrozen = accountState.is_emergency_frozen === true;
+      const isMinorRestricted = accountState.is_minor_restricted === true;
+
+      if (isDeletionPending || isDeleted) {
+        if (url.pathname.startsWith('/api/')) {
+          return NextResponse.json(
+            {
+              error: isDeleted ? 'This account has been deleted and cannot access the platform.' : 'This account is scheduled for deletion and access is disabled.',
+              code: isDeleted ? 'ACCOUNT_DELETED' : 'ACCOUNT_DELETION_PENDING',
+            },
+            { status: 403 }
+          );
+        }
+        url.pathname = '/login';
+        url.searchParams.set('error', isDeleted ? 'account_deleted' : 'account_deletion_pending');
+        return NextResponse.redirect(url);
+      }
+
+      if (isBanned) {
+        if (url.pathname.startsWith('/api/')) {
+          return NextResponse.json(
+            { error: 'This account is banned and cannot access the platform.', code: 'ACCOUNT_BANNED' },
+            { status: 403 }
+          );
+        }
         url.pathname = '/dashboard/banned';
+        return NextResponse.redirect(url);
+      }
+
+      if (isSuspended || isRestricted || isOnHold || isEmergencyFrozen || isMinorRestricted) {
+        const restrictionCode = isSuspended
+          ? 'ACCOUNT_SUSPENDED'
+          : isRestricted
+            ? 'ACCOUNT_RESTRICTED'
+            : isOnHold
+              ? 'ACCOUNT_ON_HOLD'
+              : isEmergencyFrozen
+                ? 'ACCOUNT_EMERGENCY_FROZEN'
+                : 'ACCOUNT_MINOR_RESTRICTED';
+        const restrictionMessage = isSuspended
+          ? 'This account is suspended and cannot access protected actions.'
+          : isRestricted
+            ? 'This account is restricted and cannot access protected actions.'
+            : isOnHold
+              ? 'This account is on hold and cannot access protected actions.'
+              : isEmergencyFrozen
+                ? 'This account is temporarily frozen and cannot access protected actions.'
+                : 'This account is restricted from platform actions.';
+
+        if (url.pathname.startsWith('/api/')) {
+          return NextResponse.json(
+            { error: restrictionMessage, code: restrictionCode },
+            { status: 403 }
+          );
+        }
+        url.pathname = '/login';
+        url.searchParams.set(
+          'error',
+          isSuspended ? 'account_suspended'
+            : isRestricted ? 'account_restricted'
+              : isOnHold ? 'account_on_hold'
+                : isEmergencyFrozen ? 'account_frozen'
+                  : 'account_minor_restricted'
+        );
         return NextResponse.redirect(url);
       }
     }
@@ -106,34 +208,68 @@ export async function middleware(request: NextRequest) {
 
     if (isMaintenanceOrLoginCheckPath) {
       try {
-        const { data: sysSettings } = await supabase
-          .from('system_settings')
-          .select('key, value')
-          .in('key', ['emergency_mode', 'maintenance_mode', 'prevent_user_login']);
+        // Read only the three allowlisted, non-secret operational flags. RLS and
+        // column grants prevent clients from reading other settings or writing rows.
+        const { data: sysSettings, error: sysSettingsError } = await supabase.rpc(
+          'get_public_platform_control_flags'
+        );
 
-        const isEmergencyOn = sysSettings?.some((s: any) => s.key === 'emergency_mode' && (s.value === 'true' || s.value === true));
-        const isMaintenanceOn = sysSettings?.some((s: any) => s.key === 'maintenance_mode' && (s.value === 'true' || s.value === true));
-        const isPreventLoginOn = sysSettings?.some((s: any) => s.key === 'prevent_user_login' && (s.value === 'true' || s.value === true));
+        const readControlFlag = (key: string): boolean | null => {
+          const row = Array.isArray(sysSettings)
+            ? sysSettings.find((setting: any) => setting.key === key)
+            : null;
+          if (!row || row.value === null || row.value === undefined) return null;
+          if (row.value === true || row.value === 'true' || row.value === 1 || row.value === '1') return true;
+          if (row.value === false || row.value === 'false' || row.value === 0 || row.value === '0') return false;
+          return null;
+        };
+
+        // Emergency controls are security controls: never treat an unavailable or
+        // missing setting as "off". Fail closed for user-facing routes.
+        const emergencyModeValue = readControlFlag('emergency_mode');
+        const maintenanceModeValue = readControlFlag('maintenance_mode');
+        const preventLoginValue = readControlFlag('prevent_user_login');
+        const emergencySettingAvailable =
+          emergencyModeValue !== null &&
+          maintenanceModeValue !== null &&
+          preventLoginValue !== null;
+
+        if (sysSettingsError || !emergencySettingAvailable) {
+          console.error('Platform emergency control state unavailable:', sysSettingsError?.message || 'emergency_mode setting missing');
+          if (url.pathname.startsWith('/api/')) {
+            return NextResponse.json(
+              { error: 'Platform access controls could not be verified. Please retry.', code: 'PLATFORM_CONTROL_STATE_UNAVAILABLE' },
+              { status: 503 }
+            );
+          }
+          url.pathname = '/login';
+          url.searchParams.set('error', 'platform_controls_unavailable');
+          return NextResponse.redirect(url);
+        }
+
+        const isEmergencyOn = emergencyModeValue === true;
+        const isMaintenanceOn = maintenanceModeValue === true;
+        const isPreventLoginOn = preventLoginValue === true;
 
         if (isEmergencyOn || isMaintenanceOn || isPreventLoginOn) {
-          let isAdmin = false;
-          if (user) {
-            const { data: prof, error: profError } = await supabase
-              .from('profiles')
-              .select('role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status')
-              .eq('id', user.id)
-              .maybeSingle();
-
-            const status = String(prof?.account_status || prof?.status || '').trim().toLowerCase();
-            const activeProfile = Boolean(prof) &&
-              prof?.is_banned !== true &&
-              prof?.is_restricted !== true &&
-              prof?.is_on_hold !== true &&
-              prof?.is_suspended !== true &&
-              !['banned', 'restricted', 'suspended', 'on_hold', 'hold', 'frozen', 'disabled', 'closed', 'deleted', 'deletion_pending'].includes(status);
-
-            isAdmin = !profError && activeProfile &&
-              (prof?.role === 'admin' || prof?.is_admin === true || prof?.is_admin_account === true);
+          let isAdmin = user?.app_metadata?.role === 'admin';
+          if (!isAdmin && user) {
+            // Protected profile role columns are intentionally not readable by
+            // browser-authenticated clients. Use the self-scoped trusted DB helper.
+            const { data: verifiedAdmin, error: adminCheckError } = await supabase.rpc('is_admin');
+            if (adminCheckError) {
+              console.error('Unable to verify administrator access during platform lockdown:', adminCheckError.message);
+              if (url.pathname.startsWith('/api/')) {
+                return NextResponse.json(
+                  { error: 'Administrator status could not be verified.', code: 'ADMIN_STATUS_UNAVAILABLE' },
+                  { status: 503 }
+                );
+              }
+              url.pathname = '/login';
+              url.searchParams.set('error', 'admin_status_unavailable');
+              return NextResponse.redirect(url);
+            }
+            isAdmin = verifiedAdmin === true;
           }
 
           // If not admin, apply emergency / maintenance / login-disabled rules
@@ -210,7 +346,17 @@ export async function middleware(request: NextRequest) {
           }
         }
       } catch (mErr) {
-        console.warn('Maintenance check warning in middleware:', mErr);
+        // A thrown request or parsing failure must not silently disable platform controls.
+        console.error('Platform emergency control enforcement failed:', mErr);
+        if (url.pathname.startsWith('/api/')) {
+          return NextResponse.json(
+            { error: 'Platform access controls could not be verified. Please retry.', code: 'PLATFORM_CONTROL_STATE_UNAVAILABLE' },
+            { status: 503 }
+          );
+        }
+        url.pathname = '/login';
+        url.searchParams.set('error', 'platform_controls_unavailable');
+        return NextResponse.redirect(url);
       }
     }
 
@@ -242,32 +388,31 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(url);
       }
 
-      // 2. Use the current database profile as the authority; never trust stale JWT role claims.
-      const { data: adminProfileCheck, error: adminProfileError } = await supabase
-        .from('profiles')
-        .select('role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status')
-        .eq('id', user.id)
-        .maybeSingle();
+      // 2. Use the canonical admin-verification RPC. Do not trust role metadata
+      // or profile flags alone, and do not fall back to an RPC whose production
+      // EXECUTE grant is unavailable to authenticated callers.
+      const { data: verificationResult, error: verificationError } = await supabase.rpc(
+        'verify_admin_login',
+        { user_uuid: user.id }
+      );
 
-      const adminAccountStatus = String(adminProfileCheck?.account_status || adminProfileCheck?.status || '').trim().toLowerCase();
-      const activeAdminProfile = Boolean(adminProfileCheck) &&
-        adminProfileCheck?.is_banned !== true &&
-        adminProfileCheck?.is_restricted !== true &&
-        adminProfileCheck?.is_on_hold !== true &&
-        adminProfileCheck?.is_suspended !== true &&
-        !['banned', 'restricted', 'suspended', 'on_hold', 'hold', 'frozen', 'disabled', 'closed', 'deleted', 'deletion_pending'].includes(adminAccountStatus);
+      if (verificationError) {
+        // Fail closed when the canonical authorization source is unavailable.
+        if (url.pathname.startsWith('/api/admin')) {
+          return NextResponse.json(
+            { success: false, error: 'Administrator privileges could not be verified.', code: 'ADMIN_VERIFICATION_UNAVAILABLE' },
+            { status: 503 }
+          );
+        }
+        url.pathname = '/adminnarayan/login';
+        url.searchParams.set('error', 'verification_unavailable');
+        return NextResponse.redirect(url);
+      }
 
-      const isAdmin =
-        !adminProfileError &&
-        activeAdminProfile &&
-        (
-          adminProfileCheck?.role === 'admin' ||
-          adminProfileCheck?.is_admin === true ||
-          adminProfileCheck?.is_admin_account === true
-        );
+      const isVerifiedAdmin = verificationResult?.[0]?.is_valid === true;
 
-      // 3. Reject if the authoritative profile check fails or no active full-admin role exists.
-      if (!isAdmin) {
+      // 3. Reject users whose canonical admin verification fails.
+      if (!isVerifiedAdmin) {
         if (url.pathname.startsWith('/api/admin')) {
           return NextResponse.json({ success: false, error: 'Access denied. Administrator privileges required.' }, { status: 403 });
         }
@@ -295,7 +440,7 @@ export async function middleware(request: NextRequest) {
         if (is2FAActive) {
           const sessionCookie = request.cookies.get(ADMIN_2FA_COOKIE_NAME)?.value;
           const securityVersion = adminProf?.admin_2fa_recovery_updated_at || user.id;
-          const verification = verifyAdmin2FASessionToken(sessionCookie, user.id, securityVersion);
+          const verification = await verifyAdmin2FASessionTokenEdge(sessionCookie, user.id, securityVersion);
 
           if (!verification.valid) {
             if (url.pathname.startsWith('/api/admin')) {
@@ -340,7 +485,7 @@ export async function middleware(request: NextRequest) {
         if (isUser2FAActive) {
           const sessionCookie = request.cookies.get(USER_2FA_COOKIE_NAME)?.value;
           const securityVersion = userProf?.updated_at || user.id;
-          const verification = verifyUser2FASessionToken(sessionCookie, user.id, securityVersion);
+          const verification = await verifyUser2FASessionTokenEdge(sessionCookie, user.id, securityVersion);
 
           if (!verification.valid) {
             if (url.pathname.startsWith('/api/')) {
@@ -358,26 +503,53 @@ export async function middleware(request: NextRequest) {
       }
     }
   } catch (e) {
-    console.error('Middleware auth verification failed:', e);
-    if (isMachineAuthenticatedApi) return supabaseResponse;
+    // Do not let an Auth/network failure bypass page, admin, or API guards.
+    console.error('Middleware authentication enforcement failed:', e);
+    const pathname = request.nextUrl.pathname;
+    const isStaticAsset =
+      pathname.startsWith('/_next/') ||
+      pathname.startsWith('/static/') ||
+      /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|woff2?)$/i.test(pathname);
+    const isPublicPage =
+      pathname === '/' ||
+      pathname === '/login' ||
+      pathname.startsWith('/login/') ||
+      pathname === '/signup' ||
+      pathname.startsWith('/signup/') ||
+      pathname.startsWith('/auth/') ||
+      pathname === '/support' ||
+      pathname.startsWith('/support/') ||
+      pathname === '/contact' ||
+      pathname.startsWith('/contact/') ||
+      pathname.startsWith('/users/') ||
+      pathname.startsWith('/user/') ||
+      pathname === '/adminnarayan/login' ||
+      pathname.startsWith('/adminnarayan/login/') ||
+      pathname === '/robots.txt' ||
+      pathname === '/sitemap.xml';
+    // These handlers have independent HMAC/secret authentication and must
+    // still validate that credential themselves before processing a request.
+    const isSelfAuthenticatingEndpoint =
+      pathname.startsWith('/api/cron/') ||
+      pathname.startsWith('/api/webhooks/') ||
+      pathname.startsWith('/api/didit/webhook') ||
+      pathname.startsWith('/api/kyc/webhook');
+
+    if (isStaticAsset || isPublicPage || isSelfAuthenticatingEndpoint) {
+      return supabaseResponse;
+    }
 
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Authentication verification is temporarily unavailable.' }, { status: 503 });
+      return NextResponse.json(
+        { success: false, error: 'Authentication service is temporarily unavailable.', code: 'AUTH_SERVICE_UNAVAILABLE' },
+        { status: 503 }
+      );
     }
 
-    const isPublicAuthPage =
-      pathname === '/' ||
-      pathname.startsWith('/login') ||
-      pathname.startsWith('/register') ||
-      pathname.startsWith('/auth') ||
-      pathname.startsWith('/adminnarayan/login');
-
-    if (!isPublicAuthPage && isProtectedPage) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = pathname.startsWith('/adminnarayan') ? '/adminnarayan/login' : '/login';
-      redirectUrl.searchParams.set('error', 'auth_unavailable');
-      return NextResponse.redirect(redirectUrl);
-    }
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = '/login';
+    loginUrl.searchParams.set('error', 'authentication_unavailable');
+    return NextResponse.redirect(loginUrl);
   }
 
   return supabaseResponse;

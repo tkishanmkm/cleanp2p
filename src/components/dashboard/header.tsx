@@ -325,7 +325,7 @@ export function DashboardHeader() {
           let profilesMap: Record<string, any> = {};
           if (userIds.length > 0) {
             const { data: profs } = await supabase
-              .from('profiles')
+              .from('public_profiles')
               .select('id, username, avatar_url, photo_url')
               .in('id', userIds);
             if (profs) {

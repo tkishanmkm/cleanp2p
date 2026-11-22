@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.p2p_ads_insert_trigger() FROM PUBLIC, anon, authenticated;

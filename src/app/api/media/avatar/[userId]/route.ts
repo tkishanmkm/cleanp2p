@@ -6,17 +6,54 @@ export const dynamic = 'force-dynamic';
 
 // Fast memory cache for avatar buffers / redirects
 const avatarCache = new Map<string, { buffer?: Buffer; contentType?: string; redirectUrl?: string; timestamp: number }>();
-const CACHE_TTL_MS = 60 * 1000; // 1 minute in-memory cache
+const CACHE_TTL_MS = 60 * 1000;
+const MAX_AVATAR_CACHE_ENTRIES = 500;
+const AVATAR_USER_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function cacheAvatar(key: string, value: { buffer?: Buffer; contentType?: string; redirectUrl?: string; timestamp: number }): void {
+  const now = Date.now();
+  for (const [cacheKey, entry] of avatarCache) {
+    if (now - entry.timestamp >= CACHE_TTL_MS) avatarCache.delete(cacheKey);
+  }
+  if (!avatarCache.has(key) && avatarCache.size >= MAX_AVATAR_CACHE_ENTRIES) {
+    const oldestKey = avatarCache.keys().next().value;
+    if (oldestKey) avatarCache.delete(oldestKey);
+  }
+  avatarCache.set(key, value);
+}
+
+function isAllowedExternalAvatarUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const allowedHost =
+      hostname === 'avatars.githubusercontent.com' ||
+      hostname === 'secure.gravatar.com' ||
+      hostname === 'www.gravatar.com' ||
+      hostname === 'cdn.discordapp.com' ||
+      hostname === 'platform-lookaside.fbsbx.com' ||
+      hostname.endsWith('.fbcdn.net') ||
+      hostname.endsWith('.googleusercontent.com');
+    return url.protocol === 'https:' &&
+      allowedHost &&
+      !url.username &&
+      !url.password &&
+      (url.port === '' || url.port === '443') &&
+      !url.hash;
+  } catch {
+    return false;
+  }
+}
 
 export async function GET(
   req: NextRequest,
-  context: { params: { userId: string } | Promise<{ userId: string }> }
+  context: { params: Promise<{ userId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
     const userId = rawParams?.userId;
 
-    if (!userId) {
+    if (!userId || !AVATAR_USER_ID_REGEX.test(userId)) {
       return returnFallbackSvg();
     }
 
@@ -25,14 +62,15 @@ export async function GET(
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
       if (cached.redirectUrl) {
         return NextResponse.redirect(cached.redirectUrl, {
-          headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' },
+          headers: { 'Cache-Control': 'public, max-age=600, stale-while-revalidate=900' },
         });
       }
       if (cached.buffer && cached.contentType) {
-        return new NextResponse(cached.buffer, {
+        return new NextResponse(new Uint8Array(cached.buffer), {
           headers: {
             'Content-Type': cached.contentType,
-            'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'public, max-age=600, stale-while-revalidate=900',
           },
         });
       }
@@ -54,18 +92,6 @@ export async function GET(
         avatarUrl = profile.avatar_url || profile.photo_url || null;
       }
 
-      if (!profileFound) {
-        const { data: profByUsername } = await admin
-          .from('profiles')
-          .select('avatar_url, photo_url')
-          .ilike('username', userId)
-          .maybeSingle();
-
-        if (profByUsername) {
-          profileFound = true;
-          avatarUrl = profByUsername.avatar_url || profByUsername.photo_url || null;
-        }
-      }
     } catch (dbErr) {
       console.warn('Profile fetch error in avatar media proxy:', dbErr);
     }
@@ -76,36 +102,48 @@ export async function GET(
     }
 
     // 2. Handle base64 data URIs
-    if (avatarUrl && avatarUrl.startsWith('data:image/')) {
-      const parts = avatarUrl.split(';base64,');
-      const mimeType = parts[0].replace('data:', '');
-      const base64Data = parts[1];
-      const buffer = Buffer.from(base64Data, 'base64');
-      avatarCache.set(userId, { buffer, contentType: mimeType, timestamp: Date.now() });
-      return new NextResponse(buffer, {
+    if (avatarUrl && avatarUrl.startsWith('data:')) {
+      const match = /^data:(image\/(?:webp|jpeg|png));base64,([A-Za-z0-9+/]+={0,2})$/i.exec(avatarUrl);
+      if (!match || match[2].length % 4 !== 0 || match[2].length > 2_800_000) {
+        return returnFallbackSvg();
+      }
+      const mimeType = match[1].toLowerCase();
+      const buffer = Buffer.from(match[2], 'base64');
+      if (buffer.length === 0 || buffer.length > 2 * 1024 * 1024) {
+        return returnFallbackSvg();
+      }
+      cacheAvatar(userId, { buffer, contentType: mimeType, timestamp: Date.now() });
+      return new NextResponse(new Uint8Array(buffer), {
         headers: {
           'Content-Type': mimeType,
-          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'public, max-age=600, stale-while-revalidate=900',
         },
       });
     }
 
     // 3. If it's an external absolute URL (e.g. Google avatar https://lh3.googleusercontent.com/...)
-    if (avatarUrl && (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://'))) {
-      if (!avatarUrl.includes('/api/media/avatar/')) {
-        avatarCache.set(userId, { redirectUrl: avatarUrl, timestamp: Date.now() });
+    if (avatarUrl && /^https?:/i.test(avatarUrl)) {
+      if (isAllowedExternalAvatarUrl(avatarUrl)) {
+        cacheAvatar(userId, { redirectUrl: avatarUrl, timestamp: Date.now() });
         return NextResponse.redirect(avatarUrl, {
           headers: {
-            'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+            'Cache-Control': 'public, max-age=600, stale-while-revalidate=900',
+            'X-Content-Type-Options': 'nosniff',
           },
         });
       }
+      // Do not reflect arbitrary user-supplied URLs as redirects.
+      return returnFallbackSvg();
     }
 
     // 4. Attempt Backblaze B2 resolution (parallel check)
     if (isB2Configured()) {
       const urlObj = new URL(req.url);
-      const reqExt = urlObj.searchParams.get('ext')?.replace('.', '').toLowerCase();
+      const requestedExtension = urlObj.searchParams.get('ext')?.replace(/^\./, '').toLowerCase();
+      const reqExt = requestedExtension && ['webp', 'jpg', 'jpeg', 'png'].includes(requestedExtension)
+        ? requestedExtension
+        : null;
 
       const candidateKeys: string[] = [];
       if (reqExt) {
@@ -124,11 +162,12 @@ export async function GET(
           const fileData = await downloadFromB2(key);
           if (fileData && fileData.buffer && fileData.buffer.length > 0) {
             const ct = fileData.contentType || (key.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-            avatarCache.set(userId, { buffer: fileData.buffer, contentType: ct, timestamp: Date.now() });
-            return new NextResponse(fileData.buffer, {
+            cacheAvatar(userId, { buffer: fileData.buffer, contentType: ct, timestamp: Date.now() });
+            return new NextResponse(new Uint8Array(fileData.buffer), {
               headers: {
                 'Content-Type': ct,
-                'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'public, max-age=600, stale-while-revalidate=900',
               },
             });
           }
@@ -140,13 +179,13 @@ export async function GET(
       // Presigned URL
       for (const key of candidateKeys) {
         try {
-          const presigned = await getPresignedDownloadUrl(key, 86400);
+          const presigned = await getPresignedDownloadUrl(key, 900);
           if (presigned) {
-            avatarCache.set(userId, { redirectUrl: presigned, timestamp: Date.now() });
+            cacheAvatar(userId, { redirectUrl: presigned, timestamp: Date.now() });
             return NextResponse.redirect(presigned, {
               status: 307,
               headers: {
-                'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+                'Cache-Control': 'public, max-age=600, stale-while-revalidate=900',
               },
             });
           }

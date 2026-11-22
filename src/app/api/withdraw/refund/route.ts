@@ -19,28 +19,35 @@ export async function POST(req: Request) {
 
   try {
     const supabaseAdmin = getSupabaseAdminClient();
-    const { withdrawalId, reason } = await req.json();
+    const body = await req.json();
+    const withdrawalId = body?.withdrawalId;
+    const reason = body?.reason;
 
-    if (!withdrawalId) {
-      return NextResponse.json({ error: 'Missing withdrawalId' }, { status: 400 });
+    if (typeof withdrawalId !== 'string' || !withdrawalId.trim()) {
+      return NextResponse.json({ error: 'Missing or invalid withdrawalId' }, { status: 400 });
     }
 
-    const { error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+    const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
       p_withdrawal_id: withdrawalId,
       p_error_reason: reason || 'Manual refund requested',
-      p_is_verified_unbroadcast: true,
     });
 
     if (rpcError) {
       console.error('[Refund Route] Authoritative process_failed_withdrawal RPC failed:', rpcError.message);
       return NextResponse.json(
-        { error: `Refund processing failed: ${rpcError.message}` },
+        { error: 'Refund processing failed; reconciliation may be required' },
         { status: 500 }
       );
     }
 
+    if (!refundData || refundData.success !== true) {
+      console.error('[Refund Route] Refund RPC returned an unsuccessful result:', refundData);
+      return NextResponse.json({ error: 'Refund was not confirmed by the settlement procedure' }, { status: 500 });
+    }
+
     return NextResponse.json({ success: true, message: 'Withdrawal refunded successfully' });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+  } catch (err) {
+    console.error('[Refund Route] Unexpected refund request failure:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -40,18 +40,19 @@ export function SessionManagement() {
     try {
       const { data, error } = await supabase
         .from('user_sessions')
-        .select('*')
+        .select('id,user_id,ip_address,user_agent,device_type,location,is_current,last_active_at,created_at')
         .eq('user_id', authUser.uid)
-        .order('last_login', { ascending: false });
+        .order('last_active_at', { ascending: false });
 
       if (error) throw error;
 
       const mapped: Session[] = (data || []).map((s: any) => ({
         id: s.id,
+        userId: authUser.uid,
         userAgent: s.user_agent || '',
         ipAddress: s.ip_address || '',
-        lastLogin: s.last_login || new Date().toISOString(),
-        isActive: s.is_active ?? true,
+        lastLogin: s.last_active_at || s.created_at || new Date().toISOString(),
+        isActive: s.is_current === true,
       }));
 
       setSessions(mapped);
@@ -143,7 +144,7 @@ export function SessionManagement() {
             return (
               <Alert
                 key={session.id}
-                variant={isCurrent ? 'default' : 'secondary'}
+                variant="default"
                 className={isCurrent ? 'border-primary' : ''}
               >
                 <div className="flex items-center gap-4">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export interface WalletAsset {
   asset_symbol: string;
@@ -46,8 +47,9 @@ export default function WalletBalances({
                   asset.asset_symbol.toUpperCase() === String(payload.new.asset_symbol).toUpperCase()
                     ? {
                         ...asset,
-                        available: Number(payload.new.available || 0),
-                        locked: Number(payload.new.locked || 0),
+                        available: normalizePrimaryWalletAssetBalance(payload.new).available,
+                        locked: normalizePrimaryWalletAssetBalance(payload.new).inEscrow
+                          + normalizePrimaryWalletAssetBalance(payload.new).inWithdrawal,
                       }
                     : asset
                 );
@@ -56,8 +58,9 @@ export default function WalletBalances({
                   ...prevAssets,
                   {
                     asset_symbol: String(payload.new.asset_symbol).toUpperCase(),
-                    available: Number(payload.new.available || 0),
-                    locked: Number(payload.new.locked || 0),
+                    available: normalizePrimaryWalletAssetBalance(payload.new).available,
+                    locked: normalizePrimaryWalletAssetBalance(payload.new).inEscrow
+                      + normalizePrimaryWalletAssetBalance(payload.new).inWithdrawal,
                   },
                 ];
               }

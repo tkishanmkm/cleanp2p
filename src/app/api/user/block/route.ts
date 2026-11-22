@@ -1,35 +1,15 @@
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
-import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll(); },
-          setAll(cookiesToSet) {
-            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)); } catch {}
-          },
-        },
-      }
-    );
-
-    // Support Bearer token header if provided by frontend
+    // Resolve identity only from the signed cookie or a validated bearer token.
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
     const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
 
     let user = null;
     let authError: any = null;
@@ -50,21 +30,63 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json().catch(() => ({}));
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > 4096) {
+      return NextResponse.json({ error: 'Request body too large' }, { status: 413 });
+    }
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const { targetUserId, action, activeTradeId } = body;
 
-    if (!targetUserId) {
-      return NextResponse.json({ error: 'Target user ID is required' }, { status: 400 });
+    if (typeof targetUserId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) {
+      return NextResponse.json({ error: 'A valid target user ID is required' }, { status: 400 });
+    }
+    if (targetUserId === user.id) {
+      return NextResponse.json({ error: 'You cannot block or unblock yourself.' }, { status: 400 });
+    }
+    if (action !== 'BLOCK' && action !== 'UNBLOCK') {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
 
-    // Get current user profile
-    const { data: blockerProfile } = await admin
+    if (action === 'BLOCK') {
+      const { data: targetProfile, error: targetError } = await admin
+        .from('profiles')
+        .select('id, is_admin_account')
+        .eq('id', targetUserId)
+        .maybeSingle();
+      if (targetError) return NextResponse.json({ error: 'Unable to validate target user' }, { status: 500 });
+      if (!targetProfile) return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+      if (targetProfile.is_admin_account) return NextResponse.json({ error: 'Admin accounts cannot be blocked here' }, { status: 403 });
+    }
+
+    // Get and validate the current user's account state before any block mutation.
+    const { data: blockerProfile, error: blockerProfileError } = await admin
       .from('profiles')
-      .select('id, username, blocked_users')
+      .select('id, username, blocked_users, is_banned, is_restricted, is_suspended, is_on_hold, is_emergency_frozen, is_minor_restricted, status, account_status')
       .eq('id', user.id)
       .maybeSingle();
+
+    if (blockerProfileError || !blockerProfile) {
+      return NextResponse.json({ error: 'Account status could not be verified.' }, { status: 503 });
+    }
+    const blockerStatus = String(blockerProfile.status || '').toLowerCase();
+    const blockerAccountStatus = String(blockerProfile.account_status || '').toUpperCase();
+    if (action === 'BLOCK' && (
+      blockerProfile.is_banned === true ||
+      blockerProfile.is_restricted === true ||
+      blockerProfile.is_suspended === true ||
+      blockerProfile.is_on_hold === true ||
+      blockerProfile.is_emergency_frozen === true ||
+      blockerProfile.is_minor_restricted === true ||
+      ['banned', 'restricted', 'suspended', 'deleted', 'inactive', 'on_hold', 'hold'].includes(blockerStatus) ||
+      ['BANNED', 'RESTRICTED', 'SUSPENDED', 'ON_HOLD', 'HOLD', 'BLOCKED', 'DELETION_PENDING', 'DELETED', 'INACTIVE'].includes(blockerAccountStatus)
+    )) {
+      return NextResponse.json({ error: 'Restricted accounts cannot block other users.' }, { status: 403 });
+    }
 
     const currentBlocked: string[] = Array.isArray(blockerProfile?.blocked_users)
       ? blockerProfile.blocked_users
@@ -99,38 +121,40 @@ export async function POST(request: NextRequest) {
       // 3. Post System Message in Active Trade Chat if currently running
       if (activeTradeId) {
         try {
-          const blockerName = blockerProfile?.username || 'Trader';
-          let blockedName = 'Counterpart';
-          let blockerRole: 'Buyer' | 'Seller' = 'Buyer';
-          let targetRole: 'Buyer' | 'Seller' = 'Seller';
-
+          // A user may only emit a block notice in a trade they participate in,
+          // and only when the blocked account is the other participant.
+          if (typeof activeTradeId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeTradeId)) {
+            return NextResponse.json({ success: true, message: 'User blocked.' });
+          }
           const { data: trade } = await admin
             .from('trades')
-            .select('buyer_id, seller_id')
-            .or(`id.eq.${activeTradeId},trade_id.eq.${activeTradeId}`)
+            .select('id, buyer_id, seller_id')
+            .eq('id', activeTradeId)
             .maybeSingle();
-
-          if (trade) {
-            const isBlockerBuyer = trade.buyer_id === user.id;
-            blockerRole = isBlockerBuyer ? 'Buyer' : 'Seller';
-            targetRole = isBlockerBuyer ? 'Seller' : 'Buyer';
+          const isBlockerBuyer = trade?.buyer_id === user.id;
+          const isBlockerSeller = trade?.seller_id === user.id;
+          const isCounterparty = (isBlockerBuyer && trade?.seller_id === targetUserId) ||
+            (isBlockerSeller && trade?.buyer_id === targetUserId);
+          if (!trade || (!isBlockerBuyer && !isBlockerSeller) || !isCounterparty) {
+            return NextResponse.json({ success: true, message: 'User blocked.' });
           }
 
+          const blockerName = blockerProfile?.username || 'Trader';
+          let blockedName = 'Counterpart';
           const { data: targetProfile } = await admin
-            .from('profiles')
+            .from('public_profiles')
             .select('username')
             .eq('id', targetUserId)
             .maybeSingle();
-
           if (targetProfile?.username) blockedName = targetProfile.username;
 
           await insertPaxonesSystemMessage(admin, {
-            tradeId: activeTradeId,
+            tradeId: trade.id,
             type: 'USER_BLOCKED',
             openerUsername: blockerName,
             blockedUsername: blockedName,
-            initiatorRole: blockerRole,
-            targetRole: targetRole,
+            initiatorRole: isBlockerBuyer ? 'Buyer' : 'Seller',
+            targetRole: isBlockerBuyer ? 'Seller' : 'Buyer',
           });
         } catch (msgErr) {
           console.warn('System message error during block:', msgErr);

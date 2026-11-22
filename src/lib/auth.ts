@@ -3,6 +3,10 @@ import type { User, Session } from '@supabase/supabase-js';
 
 import { sanitizeUsername } from './utils';
 
+// Browser-visible profile fields only. Credential material, recovery-code hashes,
+// security answers, encrypted TOTP seeds and private KYC metadata are never read
+// by this client helper.
+const USER_PROFILE_COLUMNS = 'id, username, email, display_name, avatar_url, photo_url, username_changed, username_changed_count, username_changes_remaining, country, preferred_currency, role, is_admin, status, is_banned, is_restricted, is_suspended, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, is_verified, id_verified, kyc_status, created_at, updated_at';
 export interface UserProfile {
   id: string;
   username?: string | null;
@@ -27,6 +31,19 @@ export interface UserProfile {
   is_banned?: boolean;
   is_restricted?: boolean;
   account_status?: string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
+  kyc_status?: string | null;
+  verification_tier?: string | number | null;
+  is_suspended?: boolean;
+  blockedUsers?: string[];
+  blocked_users?: string[];
+  tradeVolume?: number;
+  completedTrades?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  feedbackScore?: number;
   btc_balance?: number;
   eth_balance?: number;
   usdt_balance?: number;
@@ -279,7 +296,6 @@ export async function handleSignUp(formData: {
         date_of_birth: formattedDob,
         country: formData.country,
         security_question: formData.securityQuestion,
-        security_answer: formData.securityAnswer,
       },
     },
   });
@@ -292,20 +308,30 @@ export async function handleSignUp(formData: {
   // Update profile with full_name and auto-generated username as display name
   if (data.user) {
     try {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: data.user.email,
-        full_name: formData.fullName.trim(),
-        name: formData.fullName.trim(),
-        username: generatedUsername,
-        display_name: generatedUsername, // Profile username is display name
-        dob: formattedDob,
-        date_of_birth: formattedDob,
-        security_question: formData.securityQuestion,
-        security_answer: formData.securityAnswer,
-        country: formData.country,
-        updated_at: new Date().toISOString(),
-      });
+      const { data: updatedProfile, error: updateProfileError } = await supabase
+        .from('profiles')
+        .update({
+          email: data.user.email,
+          full_name: formData.fullName.trim(),
+          name: formData.fullName.trim(),
+          username: generatedUsername,
+          display_name: generatedUsername, // Profile username is display name
+          dob: formattedDob,
+          date_of_birth: formattedDob,
+          security_question: formData.securityQuestion,
+          country: formData.country,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', data.user.id)
+        .select('id')
+        .maybeSingle();
+
+      if (updateProfileError || !updatedProfile) {
+        console.warn('Signup profile update was not applied; sequence-backed auth trigger reconciliation is required.', {
+          code: updateProfileError?.code || null,
+          userId: data.user.id,
+        });
+      }
     } catch (e) {
       console.warn('Profile save note:', e);
     }
@@ -350,7 +376,6 @@ export async function signUpWithEmail(
           date_of_birth: metadata?.dob,
           country: metadata?.country,
           security_question: metadata?.securityQuestion || metadata?.security_question,
-          security_answer: metadata?.securityAnswer || metadata?.security_answer,
         },
       },
     });
@@ -359,29 +384,35 @@ export async function signUpWithEmail(
       return { data: null, error: handleAuthError(error) };
     }
 
-    // Ensure profile row exists in profiles table with username and full_name
+    // Update only the profile created by the sequence-backed auth trigger.
     if (data.user) {
       try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email: data.user.email,
-          username: resolvedUsername,
-          display_name: resolvedDisplayName,
-          full_name: resolvedFullName,
-          name: resolvedFullName,
-          dob: metadata?.dob,
-          date_of_birth: metadata?.dob,
-          security_question: metadata?.securityQuestion || metadata?.security_question,
-          security_answer: metadata?.securityAnswer || metadata?.security_answer,
-          country: metadata?.country,
-          role: 'user',
-          is_admin: false,
-          status: 'active',
-          username_changed: false,
-          updated_at: new Date().toISOString(),
-        });
-      } catch (upsertErr) {
-        console.warn('Non-blocking profile upsert notice:', upsertErr);
+        const { data: updatedProfile, error: updateProfileError } = await supabase
+          .from('profiles')
+          .update({
+            email: data.user.email,
+            username: resolvedUsername,
+            display_name: resolvedDisplayName,
+            full_name: resolvedFullName,
+            name: resolvedFullName,
+            dob: metadata?.dob,
+            date_of_birth: metadata?.dob,
+            security_question: metadata?.securityQuestion || metadata?.security_question,
+            country: metadata?.country,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', data.user.id)
+          .select('id')
+          .maybeSingle();
+
+        if (updateProfileError || !updatedProfile) {
+          console.warn('Signup profile update was not applied; sequence-backed auth trigger reconciliation is required.', {
+            code: updateProfileError?.code || null,
+            userId: data.user.id,
+          });
+        }
+      } catch (profileUpdateErr) {
+        console.warn('Non-blocking signup profile update notice:', profileUpdateErr);
       }
     }
 
@@ -476,32 +507,22 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     const { isConfigured } = checkSupabaseConfig();
     if (!isConfigured) return null;
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
-      .select('*')
+      .select(USER_PROFILE_COLUMNS)
       .eq('id', userId)
       .maybeSingle();
-
-    if (!data) {
-      const fallback = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (fallback.data) {
-        data = fallback.data;
-        error = null;
-      }
-    }
 
     if (error || !data) {
       return null;
     }
 
-    const btcVal = Number(data.btc_balance ?? data.btcBalance ?? data.wallets?.BTC?.balance ?? 0);
-    const ethVal = Number(data.eth_balance ?? data.ethBalance ?? data.wallets?.ETH?.balance ?? 0);
-    const usdtVal = Number(data.usdt_balance ?? data.usdtBalance ?? data.wallets?.USDT?.balance ?? 0);
-    const ltcVal = Number(data.ltc_balance ?? data.ltcBalance ?? data.wallets?.LTC?.balance ?? 0);
+    // Canonical customer balances are loaded from wallet_assets by the wallet
+    // service/API. Never infer spendable funds from deprecated profile columns.
+    const btcVal = 0;
+    const ethVal = 0;
+    const usdtVal = 0;
+    const ltcVal = 0;
 
     const is2fa = Boolean(
       data.is_2fa_enabled === true ||
@@ -513,7 +534,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     );
 
     return {
-      id: data.id || data.user_id,
+      id: data.id,
       username: data.username,
       email: data.email,
       display_name: data.display_name || data.username,
@@ -522,9 +543,9 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       username_changed: Boolean(data.username_changed),
       username_changed_count: typeof data.username_changed_count === 'number' ? data.username_changed_count : (data.username_changed ? 1 : 0),
       username_changes_remaining: typeof data.username_changes_remaining === 'number' ? data.username_changes_remaining : (data.username_changed ? 0 : 1),
-      country: data.country || data.ip_based_country || null,
-      preferredCurrency: data.preferred_currency || data.preferredCurrency || 'USD',
-      preferred_currency: data.preferred_currency || data.preferredCurrency || 'USD',
+      country: data.country || null,
+      preferredCurrency: data.preferred_currency || 'USD',
+      preferred_currency: data.preferred_currency || 'USD',
       role: data.role || (data.is_admin ? 'admin' : 'user'),
       is_admin: Boolean(data.is_admin || data.role === 'admin'),
       status: data.status || 'active',
@@ -544,8 +565,6 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       ethBalance: ethVal,
       usdtBalance: usdtVal,
       ltcBalance: ltcVal,
-      wallets: data.wallets || undefined,
-      last_active: data.last_active,
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),
     };
@@ -571,14 +590,50 @@ export async function updateUserProfile(
       };
     }
 
+    const allowedFields = new Set(['display_name', 'avatar_url', 'photo_url', 'country', 'preferred_currency']);
+    const updatePayload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates || {})) {
+      if (!allowedFields.has(key)) {
+        return { data: null, error: new Error(`Profile field "${key}" cannot be changed through the browser profile helper.`) };
+      }
+      updatePayload[key] = value;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { data: null, error: new Error('No supported profile changes were provided.') };
+    }
+    if (
+      (typeof updatePayload.display_name === 'string' && updatePayload.display_name.length > 80) ||
+      (typeof updatePayload.avatar_url === 'string' && updatePayload.avatar_url.length > 2048) ||
+      (typeof updatePayload.photo_url === 'string' && updatePayload.photo_url.length > 2048) ||
+      (typeof updatePayload.country === 'string' && !/^[A-Za-z]{2}$/.test(updatePayload.country)) ||
+      (typeof updatePayload.preferred_currency === 'string' && !/^[A-Za-z]{3}$/.test(updatePayload.preferred_currency))
+    ) {
+      return { data: null, error: new Error('One or more profile values are invalid.') };
+    }
+
+    for (const key of ['avatar_url', 'photo_url'] as const) {
+      const value = updatePayload[key];
+      if (typeof value === 'string') {
+        try {
+          const parsed = new URL(value);
+          if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+            throw new Error('Avatar URLs must use HTTPS.');
+          }
+        } catch {
+          return { data: null, error: new Error('Avatar URLs must be valid HTTPS links.') };
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('profiles')
       .update({
-        ...updates,
+        ...updatePayload,
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId)
-      .select()
+      .select(USER_PROFILE_COLUMNS)
       .single();
 
     if (error) {

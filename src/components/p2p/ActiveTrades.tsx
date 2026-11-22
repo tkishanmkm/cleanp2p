@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 interface Trade {
   id: string;
   order_id: string;
+  trade_id?: string;
+  public_id?: string;
   seller_id: string;
   buyer_id: string;
   amount: number;

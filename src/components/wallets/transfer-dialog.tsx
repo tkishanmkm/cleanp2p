@@ -27,14 +27,16 @@ import { Loader2, ArrowRight, UserCheck, Sparkles, Percent, Ban, AlertCircle, Sh
 import { useWallet } from '@/context/wallet-context';
 import { useAuth } from '@/components/providers/auth-provider';
 import { supabase } from '@/lib/supabase/client';
+import { usePlatformFeeSettings } from '@/hooks/use-platform-fees';
+import { useI18n } from '@/context/i18n-context';
 
-const transferSchema = z.object({
-  recipient: z.string().min(1, 'Username or deposit address is required.'),
-  amount: z.coerce.number().positive('Amount must be greater than 0.'),
+const createTransferSchema = (t: (key: string) => string) => z.object({
+  recipient: z.string().min(1, t('transferDialog.schemaRecipientRequired')),
+  amount: z.coerce.number().positive(t('transferDialog.schemaAmountPositive')),
   totpCode: z.string().optional(),
 });
 
-type TransferFormValues = z.infer<typeof transferSchema>;
+type TransferFormValues = z.infer<ReturnType<typeof createTransferSchema>>;
 
 interface TransferDialogProps {
   open: boolean;
@@ -45,12 +47,12 @@ interface TransferDialogProps {
 interface RecipientInfo {
   id: string;
   username: string;
-  is_banned?: boolean;
-  is_restricted?: boolean;
-  account_status?: string;
+  is_trading_eligible: boolean;
 }
 
 export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProps) {
+  const { t } = useI18n();
+  const transferSchema = useMemo(() => createTransferSchema(t), [t]);
   const { user, profile: senderProfile } = useAuth();
   const { toast } = useToast();
   const { balances, refreshBalances } = useWallet();
@@ -58,6 +60,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
   const [resolvedRecipient, setResolvedRecipient] = useState<RecipientInfo | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
+  const { fees: platformFees, isLoading: isFeeSettingsLoading, error: feeSettingsError } = usePlatformFeeSettings();
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const existing = window.sessionStorage.getItem('pax_transfer_idemp');
@@ -95,21 +98,11 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
       const uid = user.uid || user.id;
       const check2FA = async () => {
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
-            .or(`id.eq.${uid},user_id.eq.${uid}`)
-            .maybeSingle();
-          if (data) {
-            const has2fa = Boolean(
-              data.is_2fa_enabled === true ||
-              data.is_2fa_enabled === 'true' ||
-              data.is_mfa_enabled === true ||
-              data.is_mfa_enabled === 'true' ||
-              data.two_factor_enabled === true ||
-              data.two_factor_enabled === 'true'
-            );
-            setIs2faEnabledState(has2fa);
+          const { data, error } = await supabase.rpc('get_user_2fa_status', {
+            p_user_id: uid,
+          });
+          if (!error && typeof data === 'boolean') {
+            setIs2faEnabledState(data);
           }
         } catch (e) {
           console.warn('TransferDialog 2FA check error:', e);
@@ -162,11 +155,10 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
     return balances[asset].available || 0;
   }, [asset, balances]);
 
-  // Transfer fee calculation: 1.5%
-  // E.g., Transfer 100 USDT -> Fee is 1.5 USDT -> Total deducted: 101.5 USDT
+  const feeRate = platformFees ? platformFees.platformFeePercent / 100 : 0;
   const transferFee = useMemo(() => {
-    return Number((numericWatchedAmount * 0.015).toFixed(8));
-  }, [numericWatchedAmount]);
+    return Number((numericWatchedAmount * feeRate).toFixed(8));
+  }, [numericWatchedAmount, feeRate]);
 
   const totalDeduction = useMemo(() => {
     return Number((numericWatchedAmount + transferFee).toFixed(8));
@@ -176,25 +168,17 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
     return totalDeduction > availableBalance;
   }, [totalDeduction, availableBalance]);
 
-  // Max Button Logic: Automatically computes max amount such that amount + 1.5% fee <= availableBalance
-  // amount * 1.015 = availableBalance  ==>  amount = availableBalance / 1.015
+  // Max Button Logic: amount + configured fee must stay within the available balance.
   const handleSetMax = () => {
-    if (availableBalance <= 0) return;
-    const maxAmount = availableBalance / 1.015;
+    if (!platformFees || availableBalance <= 0) return;
+    const maxAmount = availableBalance / (1 + feeRate);
     // Round down to 6 decimals safely
     const rounded = Math.floor(maxAmount * 1000000) / 1000000;
     form.setValue('amount', rounded);
   };
 
   const isRecipientRestricted = useMemo(() => {
-    if (!resolvedRecipient) return false;
-    return Boolean(
-      resolvedRecipient.is_banned ||
-      resolvedRecipient.is_restricted ||
-      resolvedRecipient.account_status === 'suspended' ||
-      resolvedRecipient.account_status === 'banned' ||
-      resolvedRecipient.account_status === 'restricted'
-    );
+    return resolvedRecipient !== null && resolvedRecipient.is_trading_eligible !== true;
   }, [resolvedRecipient]);
 
   // Real-time recipient check (username or deposit address)
@@ -208,34 +192,52 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
 
       setIsResolving(true);
       try {
-        // 1. Check by username or UUID
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('id, username, is_banned, is_restricted, account_status')
-          .or(`username.ilike.${target},id.eq.${target}`)
+        // 1. Resolve usernames with a parameterized filter. Never interpolate
+        // raw recipient input into a PostgREST .or() expression.
+        const escapedTarget = target.replace(/[\\%_]/g, '\\$&');
+        const { data: profByUsername } = await supabase
+          .from('public_profiles')
+          .select('id, username, is_trading_eligible')
+          .ilike('username', escapedTarget)
           .maybeSingle();
 
-        if (prof) {
-          setResolvedRecipient(prof as RecipientInfo);
+        if (profByUsername) {
+          setResolvedRecipient(profByUsername as RecipientInfo);
           return;
         }
 
-        // 2. Check by deposit address
-        const { data: dep } = await supabase
-          .from('deposit_addresses')
-          .select('user_id')
-          .eq('address', target)
-          .maybeSingle();
-
-        if (dep?.user_id) {
-          const { data: p } = await supabase
-            .from('profiles')
-            .select('id, username, is_banned, is_restricted, account_status')
-            .eq('id', dep.user_id)
+        // 2. Resolve UUID recipients with a separate exact comparison.
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target);
+        if (isUuid) {
+          const { data: profileById } = await supabase
+            .from('public_profiles')
+            .select('id, username, is_trading_eligible')
+            .eq('id', target)
             .maybeSingle();
-          if (p) {
-            setResolvedRecipient(p as RecipientInfo);
+
+          if (profileById) {
+            setResolvedRecipient(profileById as RecipientInfo);
             return;
+          }
+        }
+
+        // 3. Address ownership is resolved on the server because RLS only
+        // permits users to read their own deposit-address rows.
+        if (/^(?:0x[0-9a-fA-F]{40}|[A-Za-z0-9]{20,128})$/.test(target)) {
+          const response = await fetch('/api/wallet/resolve-deposit-recipient', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: target }),
+          });
+
+          if (response.ok) {
+            const payload = await response.json();
+            if (payload?.recipient?.id && payload?.recipient?.username) {
+              setResolvedRecipient(payload.recipient as RecipientInfo);
+              return;
+            }
+          } else if (response.status !== 404) {
+            throw new Error('Recipient address ownership could not be verified.');
           }
         }
 
@@ -269,8 +271,8 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
     if (isSenderRestricted) {
       toast({
         variant: 'destructive',
-        title: 'Account Restricted',
-        description: 'Your account is banned or restricted. You cannot send transfers.',
+        title: t('transferDialog.senderRestrictedTitle'),
+        description: t('transferDialog.senderRestrictedDescription'),
       });
       return;
     }
@@ -278,24 +280,33 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
     if (isRecipientRestricted) {
       toast({
         variant: 'destructive',
-        title: 'Recipient Restricted',
-        description: `Cannot transfer: Recipient @${resolvedRecipient?.username} is banned or restricted on the platform.`,
+        title: t('transferDialog.recipientRestrictedTitle'),
+        description: t('transferDialog.recipientRestrictedDescription').replace('{username}', String(resolvedRecipient?.username || '')),
+      });
+      return;
+    }
+
+    if (isFeeSettingsLoading || !platformFees) {
+      toast({
+        variant: 'destructive',
+        title: t('transferDialog.unavailableTitle'),
+        description: feeSettingsError || t('transferDialog.feeSettingsUnverified'),
       });
       return;
     }
 
     if (totalDeduction > availableBalance) {
       form.setError('amount', {
-        message: `Insufficient balance. Total deduction with 1.5% fee is ${totalDeduction} ${asset}, but available is ${availableBalance} ${asset}.`,
+        message: t('transferDialog.insufficientBalance').replace('{fee}', platformFees.platformFeePercent.toFixed(2)).replace('{deducted}', String(totalDeduction)).replace('{available}', String(availableBalance)).replace('{asset}', String(asset)),
       });
       return;
     }
 
     if (is2faActive) {
       const otp = (values.totpCode || '').trim();
-      if (!otp || otp.length < 4 || otp.length > 8) {
+      if (!/^\d{6}$/.test(otp)) {
         form.setError('totpCode', {
-          message: 'Valid 4-8 digit authenticator OTP code is required for transfers.',
+          message: t('transferDialog.validOtp'),
         });
         return;
       }
@@ -320,18 +331,18 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
 
       const json = await res.json();
       if (!res.ok || json.error) {
-        throw new Error(json.error || 'Failed to complete internal transfer');
+        throw new Error(json.error || t('transferDialog.failedGeneric'));
       }
 
       if (json.idempotentReplay || json.idempotent_replay) {
         toast({
-          title: 'Transfer Already Completed',
-          description: `This transfer was previously processed (ID: ${json.transferId}).`,
+          title: t('transferDialog.transferAlreadyCompleted'),
+          description: t('transferDialog.transferPreviouslyProcessed').replace('{id}', String(json.transferId)),
         });
       } else {
         toast({
-          title: 'Transfer Completed Instantly!',
-          description: `Sent ${values.amount} ${coin} to @${json.recipientUsername} (ID: ${json.transferId}) with fee ${json.fee} ${coin}.`,
+          title: t('transferDialog.transferCompleted'),
+          description: t('transferDialog.transferSuccessDescription').replace('{amount}', String(values.amount)).replace('{asset}', String(coin)).replace('{username}', String(json.recipientUsername)).replace('{id}', String(json.transferId)).replace('{fee}', String(json.fee)),
         });
       }
 
@@ -341,13 +352,13 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
       await refreshBalances();
       onOpenChange(false);
     } catch (err: any) {
-      const msg = err.message || 'Could not process internal transfer.';
+      const msg = err.message || t('transferDialog.couldNotProcess');
       if (msg.toLowerCase().includes('totp') || msg.toLowerCase().includes('2fa') || msg.toLowerCase().includes('authenticator')) {
         setIs2faEnabledState(true);
       }
       toast({
         variant: 'destructive',
-        title: 'Transfer Failed',
+        title: t('transferDialog.transferFailed'),
         description: msg,
       });
     } finally {
@@ -364,9 +375,13 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <DialogTitle className="text-xl font-bold">Instant Transfer {coin}</DialogTitle>
+              <DialogTitle className="text-xl font-bold">{t('transferDialog.title').replace('{asset}', String(coin))}</DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Zero network confirmation wait · 1.5% platform transfer fee
+                {isFeeSettingsLoading
+                  ? t('transferDialog.loadingFees')
+                  : platformFees
+                  ? t('transferDialog.feeDescription').replace('{fee}', platformFees.platformFeePercent.toFixed(2))
+                  : t('transferDialog.disabledFeeSettings')}
               </DialogDescription>
             </div>
           </div>
@@ -375,7 +390,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
         {isSenderRestricted && (
           <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg text-xs flex items-center gap-2">
             <Ban className="h-4 w-4 shrink-0" />
-            <span>Your account is restricted or banned. You cannot send or receive transfers.</span>
+            <span>{t('transferDialog.restrictedBanner')}</span>
           </div>
         )}
 
@@ -387,11 +402,11 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               name="recipient"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-xs font-semibold">Recipient (Username or Address)</FormLabel>
+                  <FormLabel className="text-xs font-semibold">{t('transferDialog.recipientLabel')}</FormLabel>
                   <FormControl>
                     <div className="relative">
                       <Input
-                        placeholder="e.g. quickbot.65 or deposit address"
+                        placeholder={t('transferDialog.recipientPlaceholder')}
                         {...field}
                         value={field.value || ''}
                         disabled={isSenderRestricted}
@@ -416,12 +431,12 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                     isRecipientRestricted ? (
                       <p className="text-[11px] text-destructive font-medium flex items-center gap-1">
                         <AlertCircle className="h-3.5 w-3.5" />
-                        Recipient <strong>@{resolvedRecipient.username}</strong> is banned or restricted. Transfers are blocked.
+                        {t('transferDialog.recipientRestrictedInline').replace('{username}', resolvedRecipient.username)}
                       </p>
                     ) : (
                       <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
                         <UserCheck className="h-3.5 w-3.5" />
-                        Recipient verified: <strong>@{resolvedRecipient.username}</strong>
+                        {t('transferDialog.recipientVerified')} <strong>@{resolvedRecipient.username}</strong>
                       </p>
                     )
                   )}
@@ -437,9 +452,9 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               render={({ field }) => (
                 <FormItem>
                   <div className="flex justify-between items-center">
-                    <FormLabel className="text-xs font-semibold">Transfer Amount</FormLabel>
+                    <FormLabel className="text-xs font-semibold">{t('transferDialog.amountLabel')}</FormLabel>
                     <span className="text-[11px] text-muted-foreground">
-                      Available: <strong className="text-foreground">{availableBalance.toFixed(6)} {coin}</strong>
+                      {t('transferDialog.available')} <strong className="text-foreground">{availableBalance.toFixed(6)} {coin}</strong>
                     </span>
                   </div>
                   <FormControl>
@@ -461,7 +476,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                         onClick={handleSetMax}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-2.5 text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 border-0"
                       >
-                        MAX
+                        {t('transferDialog.max')}
                       </Button>
                     </div>
                   </FormControl>
@@ -475,21 +490,21 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               <div className="flex justify-between items-center text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Percent className="h-3 w-3 text-blue-500" />
-                  Transfer Fee (1.5%):
+                  {t('transferDialog.transferFee').replace('{fee}', platformFees ? platformFees.platformFeePercent.toFixed(2) : '—')}
                 </span>
                 <span className="font-mono font-medium text-foreground">
                   {transferFee > 0 ? transferFee.toFixed(6) : '0.00'} {coin}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-1.5 border-t border-border/40 text-foreground font-semibold">
-                <span>Total Amount Deducted:</span>
+                <span>{t('transferDialog.totalAmountDeducted')}</span>
                 <span className={`font-mono ${isInsufficient ? 'text-destructive font-bold' : 'text-blue-600 dark:text-blue-400'}`}>
                   {totalDeduction > 0 ? totalDeduction.toFixed(6) : '0.00'} {coin}
                 </span>
               </div>
               {isInsufficient && (
                 <p className="text-[11px] text-destructive pt-1">
-                  Exceeds your available balance of {availableBalance} {coin}.
+                  {t('transferDialog.exceedsAvailableBalance').replace('{available}', String(availableBalance)).replace('{asset}', String(coin))}
                 </p>
               )}
             </div>
@@ -503,7 +518,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                   <FormItem className="space-y-1.5 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5">
                     <FormLabel className="text-xs font-semibold flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
                       <Shield className="h-3.5 w-3.5" />
-                      Two-Factor Authentication (2FA) OTP
+                      {t('transferDialog.twoFactorOtp')}
                     </FormLabel>
                     <FormControl>
                       <Input
@@ -511,9 +526,10 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                         type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
-                        maxLength={8}
-                        placeholder="Enter 4-8 digit authenticator OTP"
+                        maxLength={6}
+                        placeholder={t('transferDialog.otpPlaceholder')}
                         {...field}
+                        onChange={(e) => field.onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
                         className="font-mono text-center tracking-widest bg-background"
                       />
                     </FormControl>
@@ -528,24 +544,26 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               type="submit"
               disabled={
                 isLoading ||
+                isFeeSettingsLoading ||
+                !platformFees ||
                 isSenderRestricted ||
                 isRecipientRestricted ||
                 !numericWatchedAmount ||
                 numericWatchedAmount <= 0 ||
                 isInsufficient ||
-                (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
+                (is2faActive && !/^\d{6}$/.test(form.watch('totpCode') || ''))
               }
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold h-10 shadow-sm cursor-pointer"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing Instant Transfer...
+                  {t('transferDialog.processing')}
                 </>
               ) : (
                 <>
                   <ArrowRight className="mr-2 h-4 w-4" />
-                  Transfer {numericWatchedAmount > 0 ? `${numericWatchedAmount} ${coin}` : coin}
+                  {t('transferDialog.submit').replace('{amount}', numericWatchedAmount > 0 ? `${numericWatchedAmount} ${coin}` : coin)}
                 </>
               )}
             </Button>

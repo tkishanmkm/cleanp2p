@@ -35,26 +35,30 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, ShieldCheck, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Loader2, ShieldCheck, Shield, Link, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { CryptoCurrency, CoinTransfer } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
-import { CoinBadgeLogo } from '@/app/(dashboard)/wallets/page';
+import { CoinBadgeLogo } from '@/components/wallets/coin-badge-logo';
+import { usePlatformFeeSettings } from '@/hooks/use-platform-fees';
+import { useI18n } from '@/context/i18n-context';
 
-const transferSchema = z.object({
-  recipientUsername: z.string().min(2, 'Recipient username is required.'),
-  crypto: z.string().min(1, 'Please select a cryptocurrency.'),
-  amount: z.coerce.number().positive('Amount must be greater than 0.'),
+const createTransferSchema = (t: (key: string) => string) => z.object({
+  recipientUsername: z.string().min(2, t('transferPage.schemaRecipientRequired')),
+  crypto: z.string().min(1, t('transferPage.schemaCryptoRequired')),
+  amount: z.coerce.number().positive(t('transferPage.schemaAmountPositive')),
   totpCode: z.string().optional(),
 });
 
-type TransferFormValues = z.infer<typeof transferSchema>;
+type TransferFormValues = z.infer<ReturnType<typeof createTransferSchema>>;
 
 export default function TransferPage() {
   const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useI18n();
+  const transferSchema = useMemo(() => createTransferSchema(t), [t]);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -63,6 +67,7 @@ export default function TransferPage() {
   const [, setIsDetailsOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
   const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
+  const { fees: platformFees, isLoading: isFeeSettingsLoading, error: feeSettingsError } = usePlatformFeeSettings();
 
   // Directly check 2FA status from Supabase profiles table
   useEffect(() => {
@@ -143,11 +148,11 @@ export default function TransferPage() {
   const recipientUsernameValue = form.watch('recipientUsername');
   const watchedAmount = Number(form.watch('amount') || 0);
 
-  const feeRate = 0.015; // 1.5% standard internal transfer fee
+  const feeRate = platformFees ? platformFees.platformFeePercent / 100 : 0;
   const feeAmount = useMemo(() => {
     if (isNaN(watchedAmount) || watchedAmount <= 0) return 0;
     return Number((watchedAmount * feeRate).toFixed(8));
-  }, [watchedAmount]);
+  }, [watchedAmount, feeRate]);
 
   const totalDeduction = useMemo(() => {
     if (isNaN(watchedAmount) || watchedAmount <= 0) return 0;
@@ -155,9 +160,9 @@ export default function TransferPage() {
   }, [watchedAmount, feeAmount]);
 
   const maxTransferableAmount = useMemo(() => {
-    if (availableBalance <= 0) return 0;
+    if (!platformFees || availableBalance <= 0) return 0;
     return Number((availableBalance / (1 + feeRate)).toFixed(8));
-  }, [availableBalance]);
+  }, [availableBalance, feeRate, platformFees]);
 
   useEffect(() => {
     let active = true;
@@ -189,24 +194,32 @@ export default function TransferPage() {
     if (isSenderRestricted) {
       toast({
         variant: 'destructive',
-        title: 'Account Restricted',
-        description: 'Your account is restricted or banned. You cannot send transfers.',
+        title: t('transferPage.accountRestrictedTitle'),
+        description: t('transferPage.accountRestrictedDescription'),
+      });
+      return;
+    }
+    if (isFeeSettingsLoading || !platformFees) {
+      toast({
+        variant: 'destructive',
+        title: t('transferPage.unavailableTitle'),
+        description: feeSettingsError || t('transferPage.feeSettingsUnverified'),
       });
       return;
     }
     setIsProcessing(true);
 
-    const requiredTotal = Number((values.amount * 1.015).toFixed(8));
+    const requiredTotal = Number((values.amount * (1 + feeRate)).toFixed(8));
     if (requiredTotal > availableBalance) {
       form.setError('amount', {
-        message: `Total required (${requiredTotal.toFixed(8)} ${watchedCrypto} incl. 1.5% fee of ${(values.amount * 0.015).toFixed(8)}) exceeds available balance (${availableBalance.toFixed(8)} ${watchedCrypto}).`
+        message: t('transferPage.insufficientBalance').replace('{total}', requiredTotal.toFixed(8)).replace('{asset}', String(watchedCrypto)).replace('{feePercent}', platformFees.platformFeePercent.toFixed(2)).replace('{feeAmount}', feeAmount.toFixed(8)).replace('{available}', availableBalance.toFixed(8)),
       });
       setIsProcessing(false);
       return;
     }
 
     if (is2faActive && (!values.totpCode || values.totpCode.trim().length < 4 || values.totpCode.trim().length > 8)) {
-      form.setError('totpCode', { message: 'Please enter your 4-8 digit Authenticator OTP code.' });
+      form.setError('totpCode', { message: t('transferPage.validOtp') });
       setIsProcessing(false);
       return;
     }
@@ -221,8 +234,8 @@ export default function TransferPage() {
       );
 
       toast({
-        title: 'Transfer Completed!',
-        description: `Successfully sent ${values.amount} ${values.crypto} to @${values.recipientUsername.replace(/^@/, '')} (1.5% Fee: ${(values.amount * 0.015).toFixed(8)} ${values.crypto}). (ID: ${transferId})`,
+        title: t('transferPage.completedTitle'),
+        description: t('transferPage.successDescription').replace('{amount}', String(values.amount)).replace('{asset}', String(values.crypto)).replace('{username}', values.recipientUsername.replace(/^@/, '')).replace('{feePercent}', platformFees.platformFeePercent.toFixed(2)).replace('{feeAmount}', feeAmount.toFixed(8)).replace('{total}', requiredTotal.toFixed(8)).replace('{id}', String(transferId)),
       });
 
       form.reset({ recipientUsername: '', crypto: values.crypto, amount: 0, totpCode: '' });
@@ -230,13 +243,13 @@ export default function TransferPage() {
       await loadBalances();
       setHistoryKey((prev) => prev + 1);
     } catch (error: any) {
-      const msg = error.message || 'Could not complete transfer.';
+      const msg = error.message || t('transferPage.couldNotComplete');
       if (msg.toLowerCase().includes('totp') || msg.toLowerCase().includes('2fa') || msg.toLowerCase().includes('authenticator')) {
         setIs2faEnabledState(true);
       }
       toast({
         variant: 'destructive',
-        title: 'Transfer Failed',
+        title: t('transferPage.failedTitle'),
         description: msg,
       });
     } finally {
@@ -256,9 +269,13 @@ export default function TransferPage() {
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight">Direct User-to-User Transfer</h1>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">{t('transferPage.title')}</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Instant internal transfers between PaxOnes user accounts with a standard 1.5% platform & network fee.
+            {isFeeSettingsLoading
+              ? t('transferPage.loadingFees')
+              : platformFees
+              ? t('transferPage.feeDescription').replace('{fee}', platformFees.platformFeePercent.toFixed(2))
+              : t('transferPage.unavailableFee')}
           </p>
         </div>
       </div>
@@ -266,25 +283,25 @@ export default function TransferPage() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
         <Card className="lg:col-span-2 shadow-xs">
           <CardHeader>
-            <CardTitle className="text-base font-bold">Send Coins</CardTitle>
+            <CardTitle className="text-base font-bold">{t('transferPage.sendCoins')}</CardTitle>
             <CardDescription className="text-xs">
-              Transfer cryptocurrency instantly to any registered trader username on PaxOnes.
+              {t('transferPage.sendCoinsDescription')}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {isSenderRestricted && (
               <div className="p-3 mb-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold flex items-center gap-2">
-                <span>Your account is restricted or banned. You cannot send or receive cryptocurrency transfers.</span>
+                <span>{t('transferPage.restrictedBanner')}</span>
               </div>
             )}
             {!isSenderTier2 && (
               <div className="p-3 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold flex flex-col gap-1.5">
                 <div className="flex items-center gap-2">
                   <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>KYC verification is required to transfer funds out.</span>
+                  <span>{t('transferPage.kycRequired')}</span>
                 </div>
                 <Link href="/settings" className="text-blue-600 dark:text-blue-400 underline text-xs">
-                  Complete Identity Verification (Tier 2) in Settings &rarr;
+                  {t('transferPage.completeKycTier2')}
                 </Link>
               </div>
             )}
@@ -295,11 +312,11 @@ export default function TransferPage() {
                   name="recipientUsername"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-semibold">Recipient Username</FormLabel>
+                      <FormLabel className="text-xs font-semibold">{t('transferPage.recipientUsername')}</FormLabel>
                       <FormControl>
                         <Input
                           id="recipient-username-input"
-                          placeholder="Search username (e.g. quickbot.65)"
+                          placeholder={t('transferPage.searchUsername')}
                           {...field}
                           disabled={isSenderRestricted || !isSenderTier2}
                           autoComplete="off"
@@ -333,8 +350,8 @@ export default function TransferPage() {
                             if (isRecipientRestricted) {
                               toast({
                                 variant: 'destructive',
-                                title: 'Recipient Restricted',
-                                description: `@${user.username} is banned or restricted and cannot receive transfers.`,
+                                title: t('transferPage.recipientRestrictedTitle'),
+                                description: t('transferPage.recipientRestrictedDesc').replace('{username}', String(user.username)),
                               });
                               return;
                             }
@@ -353,7 +370,7 @@ export default function TransferPage() {
                           </div>
                           {isRecipientRestricted && (
                             <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
-                              Restricted (Cannot receive)
+                              {t('transferPage.recipientRestrictedBadge')}
                             </span>
                           )}
                         </div>
@@ -367,7 +384,7 @@ export default function TransferPage() {
                   name="crypto"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-semibold">Select Coin</FormLabel>
+                      <FormLabel className="text-xs font-semibold">{t('transferPage.selectCoin')}</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger id="transfer-crypto-select" className="h-10">
@@ -400,15 +417,15 @@ export default function TransferPage() {
                   render={({ field }) => (
                     <FormItem>
                       <div className="flex items-center justify-between">
-                        <FormLabel className="text-xs font-semibold">Transfer Amount</FormLabel>
+                        <FormLabel className="text-xs font-semibold">{t('transferPage.transferAmount')}</FormLabel>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => form.setValue('amount', maxTransferableAmount)}
                             className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
-                            title="Calculates max amount you can send so amount + 1.5% fee equals available balance"
+                            title={t('transferPage.maxFeeTitle').replace('{fee}', platformFees?.platformFeePercent.toFixed(2) ?? '-')}
                           >
-                            Max (incl. 1.5% fee): {maxTransferableAmount.toFixed(8)} {watchedCrypto}
+                            {t('transferPage.maxFeeButton').replace('{fee}', platformFees?.platformFeePercent.toFixed(2) ?? '-').replace('{amount}', maxTransferableAmount.toFixed(8)).replace('{asset}', watchedCrypto)}
                           </button>
                         </div>
                       </div>
@@ -417,23 +434,23 @@ export default function TransferPage() {
                           id="transfer-amount-input"
                           type="number"
                           step="any"
-                          placeholder="0.00"
+                          placeholder={t('transferPage.amountPlaceholder')}
                           {...field}
                           className="font-mono text-sm"
                         />
                       </FormControl>
                       <FormDescription className="text-[11px]">
-                        Available in wallet: <span className="font-mono font-bold text-foreground">{availableBalance.toFixed(8)} {watchedCrypto}</span>
+                        {t('transferPage.availableInWallet')} <span className="font-mono font-bold text-foreground">{availableBalance.toFixed(8)} {watchedCrypto}</span>
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
 
-                {/* Transfer Breakdown & 1.5% Fee Calculation Display */}
+                {/* Transfer breakdown uses the current admin-configured percentage. */}
                 <div className="rounded-xl border border-border bg-secondary/50 p-3.5 space-y-2 text-xs">
                   <div className="flex items-center justify-between font-medium">
-                    <span className="text-muted-foreground">Transfer Amount</span>
+                    <span className="text-muted-foreground">{t('transferPage.breakdownTransferAmount')}</span>
                     <span className="font-mono font-semibold text-foreground">
                       {watchedAmount > 0 ? watchedAmount.toFixed(8) : '0.00000000'} {watchedCrypto}
                     </span>
@@ -441,9 +458,9 @@ export default function TransferPage() {
 
                   <div className="flex items-center justify-between font-medium">
                     <span className="text-muted-foreground flex items-center gap-1.5">
-                      <span>PaxOnes Platform Fee</span>
+                      <span>{t('transferPage.platformFee')}</span>
                       <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">
-                        1.5%
+                        {platformFees ? `${platformFees.platformFeePercent.toFixed(2)}%` : "-"}
                       </span>
                     </span>
                     <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
@@ -452,14 +469,14 @@ export default function TransferPage() {
                   </div>
 
                   <div className="pt-2 border-t border-border flex items-center justify-between">
-                    <span className="font-bold text-foreground">Total Wallet Deduction</span>
+                    <span className="font-bold text-foreground">{t('transferPage.totalWalletDeduction')}</span>
                     <span className="font-mono font-bold text-foreground">
                       {totalDeduction > 0 ? totalDeduction.toFixed(8) : '0.00000000'} {watchedCrypto}
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
-                    <span>Recipient receives</span>
+                    <span>{t('transferPage.recipientReceives')}</span>
                     <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                       {watchedAmount > 0 ? watchedAmount.toFixed(8) : '0.00000000'} {watchedCrypto}
                     </span>
@@ -475,7 +492,7 @@ export default function TransferPage() {
                       <FormItem className="pt-1">
                         <FormLabel className="text-xs font-semibold flex items-center gap-1.5 text-primary">
                           <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                          <span>Authenticator Two-Factor Code</span>
+                          <span>{t('transferPage.authenticatorCode')}</span>
                         </FormLabel>
                         <FormControl>
                           <Input
@@ -484,14 +501,14 @@ export default function TransferPage() {
                             inputMode="numeric"
                             autoComplete="one-time-code"
                             maxLength={8}
-                            placeholder="Enter 4-8 digit authenticator OTP"
+                            placeholder={t('transferPage.otpPlaceholder')}
                             {...field}
                             value={field.value || ''}
                             className="font-mono text-center text-base tracking-widest bg-background"
                           />
                         </FormControl>
                         <FormDescription className="text-[11px]">
-                          Two-factor authentication is active on your account. Enter the code from your authenticator app to authorize transfer.
+                          {t('transferPage.twoFactorHelp')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -505,18 +522,23 @@ export default function TransferPage() {
                   className="w-full font-bold text-xs h-10 mt-2 cursor-pointer"
                   disabled={
                     isProcessing ||
+                    isFeeSettingsLoading ||
+                    !platformFees ||
                     (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
                   }
                 >
                   {isProcessing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <span>{t('transferPage.processing')}</span>
+                    </>
                   ) : (
                     <ArrowRight className="mr-2 h-4 w-4" />
                   )}
                   <span>
                     {watchedAmount > 0
-                      ? `Send ${watchedAmount} ${watchedCrypto} (Total: ${totalDeduction.toFixed(8)} ${watchedCrypto} incl. 1.5% fee)`
-                      : `Send ${watchedCrypto} Now`}
+                      ? t('transferPage.sendWithAmount').replace('{amount}', String(watchedAmount)).replace('{asset}', String(watchedCrypto)).replace('{total}', totalDeduction.toFixed(8)).replace('{feePercent}', platformFees?.platformFeePercent.toFixed(2) || '-')
+                      : t('transferPage.sendNow').replace('{asset}', String(watchedCrypto))}
                   </span>
                 </Button>
               </form>
@@ -526,16 +548,16 @@ export default function TransferPage() {
 
         <Card className="lg:col-span-3 shadow-xs">
           <CardHeader>
-            <CardTitle className="text-base font-bold">Transfer History</CardTitle>
+            <CardTitle className="text-base font-bold">{t('transferPage.historyTitle')}</CardTitle>
             <CardDescription className="text-xs">
-              Direct transfers sent and received on your account.
+              {t('transferPage.historyDescription')}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="received" key={historyKey}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="received" className="text-xs">Received</TabsTrigger>
-                <TabsTrigger value="sent" className="text-xs">Sent</TabsTrigger>
+                <TabsTrigger value="received" className="text-xs">{t('transferPage.received')}</TabsTrigger>
+                <TabsTrigger value="sent" className="text-xs">{t('transferPage.sent')}</TabsTrigger>
               </TabsList>
               <TabsContent value="received" className="mt-4">
                 <TransferHistoryTable

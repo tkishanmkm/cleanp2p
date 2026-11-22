@@ -23,8 +23,13 @@ function getUserSessionKey(): Buffer {
     keyBuffer = Buffer.from(cleanKey, 'hex');
   } else if (cleanKey.length === 32) {
     keyBuffer = Buffer.from(cleanKey, 'utf8');
-  } else {
+  } else if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cleanKey)) {
     keyBuffer = Buffer.from(cleanKey, 'base64');
+    if (keyBuffer.toString('base64') !== cleanKey) {
+      throw new Error('USER_2FA_ENCRYPTION_KEY must be canonical Base64.');
+    }
+  } else {
+    throw new Error('USER_2FA_ENCRYPTION_KEY must be 64 hex characters, 32 UTF-8 bytes, or canonical Base64.');
   }
 
   if (keyBuffer.length !== 32) {
@@ -34,6 +39,17 @@ function getUserSessionKey(): Buffer {
   }
 
   return keyBuffer;
+}
+
+/** Purpose-separate the cookie-signing key from the AES-GCM TOTP encryption key. */
+function getUserSessionSigningKey(): Buffer {
+  return Buffer.from(crypto.hkdfSync(
+    'sha256',
+    getUserSessionKey(),
+    Buffer.from('PAXONES_2FA_HKDF_SALT_V1', 'utf8'),
+    Buffer.from('PAXONES_USER_2FA_SESSION_HMAC_V1', 'utf8'),
+    32,
+  ));
 }
 
 /**
@@ -48,10 +64,10 @@ export function createUser2FASessionToken(
 
   const verifiedAt = Date.now();
   const exp = verifiedAt + USER_2FA_SESSION_MAX_AGE_SECONDS * 1000;
-  const versionTag = securityVersion ? String(securityVersion).trim() : 'v0';
+  const versionTag = securityVersion ? encodeURIComponent(String(securityVersion).trim()) : 'v0';
 
   const payloadString = `v1:user_2fa:${userId}:${verifiedAt}:${exp}:${versionTag}`;
-  const key = getUserSessionKey();
+  const key = getUserSessionSigningKey();
   const hmac = crypto.createHmac('sha256', key).update(payloadString).digest('hex');
 
   return `${payloadString}:${hmac}`;
@@ -86,22 +102,41 @@ export function verifyUser2FASessionToken(
     }
 
     // 2. Expiration check
-    const exp = parseInt(expStr, 10);
-    if (isNaN(exp) || Date.now() > exp) {
+    const verifiedAt = Number(verifiedAtStr);
+    const exp = Number(expStr);
+    const now = Date.now();
+    if (
+      !Number.isFinite(verifiedAt) ||
+      !Number.isFinite(exp) ||
+      verifiedAt <= 0 ||
+      exp <= verifiedAt ||
+      exp - verifiedAt > USER_2FA_SESSION_MAX_AGE_SECONDS * 1000 ||
+      verifiedAt > now + 10_000 ||
+      now > exp
+    ) {
       return { valid: false, reason: 'User 2FA session token has expired' };
     }
 
     // 3. Security version check (invalidates old sessions if 2FA was rotated or updated)
     if (currentSecurityVersion && versionTag !== 'v0') {
+      let decodedVersionTag: string;
+      try {
+        decodedVersionTag = decodeURIComponent(versionTag);
+      } catch {
+        return { valid: false, reason: 'Invalid 2FA security-version encoding' };
+      }
       const cleanCurrentVersion = String(currentSecurityVersion).trim();
-      if (versionTag !== cleanCurrentVersion) {
+      if (decodedVersionTag !== cleanCurrentVersion) {
         return { valid: false, reason: '2FA credentials rotated since session issue' };
       }
     }
 
     // 4. Cryptographic HMAC verification (timing-safe)
     const payloadString = `v1:user_2fa:${userId}:${verifiedAtStr}:${expStr}:${versionTag}`;
-    const key = getUserSessionKey();
+    if (!/^[0-9a-f]{64}$/i.test(signature)) {
+      return { valid: false, reason: 'Invalid user 2FA token signature encoding' };
+    }
+    const key = getUserSessionSigningKey();
     const expectedHmac = crypto.createHmac('sha256', key).update(payloadString).digest('hex');
 
     const bufA = Buffer.from(signature, 'hex');
@@ -112,8 +147,8 @@ export function verifyUser2FASessionToken(
     }
 
     return { valid: true };
-  } catch (err: any) {
-    return { valid: false, reason: `User 2FA verification error: ${err.message}` };
+  } catch {
+    return { valid: false, reason: 'User 2FA session verification failed' };
   }
 }
 

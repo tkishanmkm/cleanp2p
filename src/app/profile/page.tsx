@@ -42,10 +42,13 @@ interface AccountData {
   is_2fa_enabled?: boolean;
   kyc_status?: string;
   verification_tier?: number | string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
 }
 
 export default function ProfilePage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [account, setAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
@@ -67,11 +70,15 @@ export default function ProfilePage() {
       const supabase = createClient();
 
       // 1. Fetch user profile
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, full_name, email, preferred_currency, preferred_fiat, dob, date_of_birth, created_at, is_2fa_enabled, is_mfa_enabled, kyc_status, verification_tier, is_verified, id_verified, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time')
         .eq('id', userId)
         .maybeSingle();
+
+      if (profileError || !profile) {
+        throw new Error('Profile information could not be loaded.');
+      }
 
       // 2. Fetch live market prices from DB for conversion
       const { data: dbMarketPrices } = await supabase
@@ -187,7 +194,9 @@ export default function ProfilePage() {
       // Compute real database averages (no fake placeholders)
       const realAvgPaymentTime = paymentTimes.length > 0
         ? Math.max(1, Math.round(paymentTimes.reduce((a, b) => a + b, 0) / paymentTimes.length))
-        : (profile?.avg_payment_time != null ? Math.round(Number(profile.avg_payment_time)) : null);
+        : ((profile?.avg_payment_time_mins ?? profile?.avg_payment_minutes ?? profile?.avg_pay_time) != null
+          ? Math.round(Number(profile.avg_payment_time_mins ?? profile.avg_payment_minutes ?? profile.avg_pay_time))
+          : null);
 
       const realAvgReleaseTime = releaseTimes.length > 0
         ? Math.max(1, Math.round(releaseTimes.reduce((a, b) => a + b, 0) / releaseTimes.length))
@@ -196,61 +205,124 @@ export default function ProfilePage() {
       // 3. Fetch Blocked Users
       const { data: blocks } = await supabase
         .from('user_blocks')
-        .select(`
-          id,
-          blocked_id,
-          created_at,
-          blocked:profiles!user_blocks_blocked_id_fkey(id, username, avatar_url)
-        `)
+        .select('id, blocked_id, created_at')
         .eq('blocker_id', userId);
 
       if (blocks) {
-        setBlockedUsers(blocks.map((b: any) => ({
-          id: b.id,
-          userId: b.blocked_id,
-          username: b.blocked?.username || 'Unknown User',
-          avatarUrl: b.blocked?.avatar_url,
-          blockedAt: b.created_at,
-        })));
+        const blockedIds = Array.from(new Set(blocks.map((block: any) => block.blocked_id).filter(Boolean)));
+        const { data: blockedProfiles } = blockedIds.length > 0
+          ? await supabase
+              .from('public_profiles')
+              .select('id, username, avatar_url, photo_url')
+              .in('id', blockedIds)
+          : { data: [] };
+        const blockedProfileMap = new Map((blockedProfiles || []).map((profile: any) => [profile.id, profile]));
+
+        setBlockedUsers(blocks.map((b: any) => {
+          const blockedProfile: any = blockedProfileMap.get(b.blocked_id);
+          return {
+            id: b.id,
+            userId: b.blocked_id,
+            username: blockedProfile?.username || 'Unknown User',
+            avatarUrl: blockedProfile?.avatar_url || blockedProfile?.photo_url || null,
+            blockedAt: b.created_at,
+          };
+        }));
       }
 
-      // 4. Fetch Feedback (given and received)
-      const { data: fb } = await supabase
-        .from('trade_feedback')
-        .select(`
-          id,
-          trade_id,
-          reviewer_id,
-          reviewee_id,
-          rating,
-          feedback_type,
-          comment,
-          created_at,
-          reviewer:profiles!trade_feedback_reviewer_id_fkey(username, avatar_url),
-          reviewee:profiles!trade_feedback_reviewee_id_fkey(username, avatar_url)
-        `)
-        .or(`reviewee_id.eq.${userId},reviewer_id.eq.${userId}`)
-        .order('created_at', { ascending: false });
+      // 4. Load feedback from both supported production stores. Newer review
+      // submissions use feedbacks; the active trade-details flow uses legacy
+      // feedback. Normalize both so given/received tabs show the same model.
+      const [canonicalFeedbackResult, legacyFeedbackResult] = await Promise.all([
+        supabase
+          .from('feedbacks')
+          .select('id, trade_id, reviewer_id, reviewee_id, is_positive, comment, created_at')
+          .or(`reviewee_id.eq.${userId},reviewer_id.eq.${userId}`)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('feedback')
+          .select('id, trade_id, from_user, from_username, to_user, rating, is_positive, comment, created_at')
+          .or(`to_user.eq.${userId},from_user.eq.${userId}`)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      const canonicalFeedback = Array.isArray(canonicalFeedbackResult.data)
+        ? canonicalFeedbackResult.data
+        : [];
+      const legacyFeedback = Array.isArray(legacyFeedbackResult.data)
+        ? legacyFeedbackResult.data.map((row: any) => ({
+            ...row,
+            reviewer_id: row.from_user,
+            reviewee_id: row.to_user,
+            is_positive: row.is_positive ?? String(row.rating || '').toLowerCase() === 'positive',
+          }))
+        : [];
+
+      // Resolve reviewer/reviewee display data through the approved public view.
+      // The private profiles table is owner-only and is not a public join target.
+      const feedbackUserIds = Array.from(new Set(
+        [...canonicalFeedback, ...legacyFeedback]
+          .flatMap((row: any) => [row.reviewer_id, row.reviewee_id])
+          .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+      ));
+      const { data: feedbackProfiles } = feedbackUserIds.length > 0
+        ? await supabase
+            .from('public_profiles')
+            .select('id, username, avatar_url, photo_url')
+            .in('id', feedbackUserIds)
+        : { data: [] };
+      const feedbackProfileMap = new Map((feedbackProfiles || []).map((profile: any) => [profile.id, profile]));
+      const attachFeedbackProfiles = (rows: any[]) => rows.map((row: any) => ({
+        ...row,
+        reviewer: feedbackProfileMap.get(row.reviewer_id) || (
+          row.from_username ? { username: row.from_username, avatar_url: null } : null
+        ),
+        reviewee: feedbackProfileMap.get(row.reviewee_id) || null,
+      }));
+
+      const resolvedCanonicalFeedback = attachFeedbackProfiles(canonicalFeedback);
+      const resolvedLegacyFeedback = attachFeedbackProfiles(legacyFeedback);
+
+      const feedbackByTradeAndReviewer = new Map<string, any>();
+      for (const row of resolvedCanonicalFeedback) {
+        const key = `${row.trade_id}:${row.reviewer_id}`;
+        feedbackByTradeAndReviewer.set(key, row);
+      }
+      // Prefer the legacy record when both stores contain the same review;
+      // it carries the username/rating fields used by existing trade screens.
+      for (const row of resolvedLegacyFeedback) {
+        const key = `${row.trade_id}:${row.reviewer_id}`;
+        feedbackByTradeAndReviewer.set(key, { ...feedbackByTradeAndReviewer.get(key), ...row });
+      }
+      const fb = Array.from(feedbackByTradeAndReviewer.values()).sort(
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      );
+
+      if (canonicalFeedbackResult.error || legacyFeedbackResult.error) {
+        console.error('[PROFILE] Feedback source warning.', {
+          canonicalCode: canonicalFeedbackResult.error?.code || null,
+          legacyCode: legacyFeedbackResult.error?.code || null,
+        });
+      }
 
       let calculatedPositiveRatingPct: number | null = null;
-      if (fb) {
+      if (fb.length > 0) {
         setFeedbacks(fb);
         const received = fb.filter((f: any) => f.reviewee_id === userId);
         if (received.length > 0) {
           const positiveCount = received.filter((f: any) =>
-            f.feedback_type === 'positive' || (typeof f.rating === 'number' && f.rating >= 4)
+            f.is_positive === true || f.is_positive === 'true' || String(f.rating || '').toLowerCase() === 'positive'
           ).length;
           calculatedPositiveRatingPct = Math.round((positiveCount / received.length) * 100);
-        } else if (profile?.positive_rating != null) {
-          calculatedPositiveRatingPct = Math.round(Number(profile.positive_rating));
         }
+      } else {
+        setFeedbacks([]);
       }
-
       setAccount({
         id: userId,
         full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
         username: profile?.username || (user as any)?.user_metadata?.username || 'user',
-        email: user.email || profile?.email || '',
+        email: user?.email || profile?.email || '',
         preferred_fiat: preferredFiat,
         total_volume: displayVolume,
         completed_trades: completedTradesCount,
@@ -258,13 +330,13 @@ export default function ProfilePage() {
         avg_release_time: realAvgReleaseTime,
         positive_rating_pct: calculatedPositiveRatingPct,
         dob: profile?.dob || profile?.date_of_birth || 'Not provided',
-        created_at: profile?.created_at || user?.created_at,
+        created_at: profile?.created_at || user?.rawUser?.created_at,
         is_2fa_enabled: Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled),
         kyc_status: profile?.kyc_status || 'NOT_SUBMITTED',
         verification_tier: profile?.verification_tier || 1,
         is_verified: profile?.is_verified,
         id_verified: profile?.id_verified,
-        is_id_verified: profile?.is_id_verified,
+        is_id_verified: Boolean(profile.id_verified || profile.is_verified),
       });
     } catch (err) {
       console.error('Failed to load full private profile:', err);

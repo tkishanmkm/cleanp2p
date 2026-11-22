@@ -25,7 +25,8 @@ export async function GET(request: Request) {
       .from('p2p_trades')
       .select('*')
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (error) {
       // Fallback: If table name is p2p_orders acting as trades
@@ -33,7 +34,8 @@ export async function GET(request: Request) {
         .from('p2p_orders')
         .select('*')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (orderErr) {
         return NextResponse.json({ success: true, trades: [] });

@@ -1,35 +1,43 @@
 "use server";
 
-import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyServerAdmin } from "@/lib/server-admin-auth";
-import { revalidatePath } from "next/cache";
+import { resolveDisputeAtomically } from "@/lib/admin-dispute-settlement";
 
-export async function resolveTradeAction(tradeId: string, decision: "release" | "refund") {
+/**
+ * Resolve a trade only through its unique open dispute. This keeps the legacy
+ * trade-table action from reaching participant escrow RPCs with a browser actor.
+ */
+export async function resolveTradeAction(
+  tradeId: string,
+  decision: "release" | "refund",
+) {
   const auth = await verifyServerAdmin();
   if (!auth.authorized || !auth.adminId) {
-    return { success: false, error: "Unauthorized: Administrator privileges required." };
+    return {
+      success: false,
+      error: "Unauthorized: Administrator privileges required.",
+    };
   }
-  if (!tradeId || !["release", "refund"].includes(decision)) {
-    return { success: false, error: "Invalid trade intervention parameters." };
-  }
-
-  const adminSupabase = createAdminClient();
-  const { data, error } = await adminSupabase.rpc("admin_intervene_trade_escrow", {
-    p_trade_id: tradeId,
-    p_action: decision,
-    p_caller_id: auth.adminId,
-    p_admin_email: auth.adminEmail || auth.user.email || null,
-    p_reason: decision === "release" ? "Administrator trade intervention: release to buyer" : "Administrator trade intervention: refund to seller",
-  });
-
-  if (error || !data || data.success !== true) {
-    const errorMessage = error?.message || data?.message || "Atomic trade intervention failed.";
-    console.error("[resolveTradeAction] Atomic intervention failed:", errorMessage);
-    return { success: false, error: errorMessage };
+  if (auth.supportAdmin === true) {
+    return {
+      success: false,
+      error: "Support administrators cannot resolve disputes or settle escrow.",
+    };
   }
 
-  revalidatePath("/adminnarayan/trades");
-  revalidatePath("/adminnarayan/dashboard");
-  revalidatePath("/adminnarayan/disputes");
-  return { success: true, data };
+  try {
+    const result = await resolveDisputeAtomically({
+      tradeId,
+      resolution: decision === "release" ? "RELEASE" : "CANCEL",
+      reason: `Administrative dispute resolution: escrow ${decision === "release" ? "released to buyer" : "refunded to seller"}.`,
+      actorId: auth.adminId,
+      actorEmail: auth.adminEmail || auth.user?.email || null,
+    });
+    return { ...result, error: undefined };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Atomic dispute settlement was rejected.",
+    };
+  }
 }

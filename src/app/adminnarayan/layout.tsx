@@ -1,19 +1,20 @@
 import { ReactNode } from "react";
-import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminShell } from "./admin-shell";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  let user = null;
-  try {
-    const supabase = await createClient();
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
-  } catch {}
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.user || auth.supportAdmin === true || auth.supportReadOnly === true) {
+    redirect("/login");
+  }
+  const user = auth.user;
 
-  // Fetch admin profile details & quick counters
+  // Fetch admin profile details & quick counters only after canonical server-side
+  // role, account-state and signed administrator 2FA verification succeeds.
   const adminSupabase = createAdminClient();
   let adminName: string | undefined;
   const counts: { disputes?: number; deposits?: number; withdrawals?: number; tickets?: number } = {};

@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.cancel_p2p_trade_atomic(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.cancel_p2p_trade_atomic(uuid, uuid, text) TO service_role;

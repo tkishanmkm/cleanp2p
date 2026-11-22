@@ -1,0 +1,1 @@
+ALTER FUNCTION public.admin_freeze_user(uuid, text) SET search_path = ''; ALTER FUNCTION public.admin_unfreeze_user(uuid, text) SET search_path = ''; ALTER FUNCTION public.admin_set_emergency_mode(boolean, text) SET search_path = '';

@@ -1,5 +1,4 @@
-import type { Metadata } from 'next';
-import { Inter, Source_Code_Pro } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Toaster as RadixToaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from 'sonner';
@@ -13,33 +12,57 @@ import { WalletProvider } from '@/context/wallet-context';
 import UserPresenceProvider from '@/components/providers/UserPresenceProvider';
 import { OnboardingModal } from '@/components/OnboardingModal';
 
-const inter = Inter({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-inter',
-});
-
-const sourceCodePro = Source_Code_Pro({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-mono',
-});
-
 export const dynamic = 'force-dynamic';
 
+const WAYONES_SITE_URL = 'https://wayones.com';
+const WAYONES_DESCRIPTION =
+  'Wayones is a secure peer-to-peer crypto marketplace with escrow protection for buyers and sellers.';
+
 export const metadata: Metadata = {
-  title: 'Paxones - Secure P2P Coin Trading',
-  description: 'A full-featured, production-quality Peer-to-Peer (P2P) coin trading platform with an escrow system.',
+  metadataBase: new URL(WAYONES_SITE_URL),
+  applicationName: 'Wayones',
+  title: {
+    default: 'Wayones | Secure P2P Crypto Trading',
+    template: '%s | Wayones',
+  },
+  description: WAYONES_DESCRIPTION,
+  category: 'finance',
+  creator: 'Wayones',
+  publisher: 'Wayones',
   manifest: '/site.webmanifest',
+  openGraph: {
+    type: 'website',
+    url: WAYONES_SITE_URL,
+    siteName: 'Wayones',
+    title: 'Wayones | Secure P2P Crypto Trading',
+    description: WAYONES_DESCRIPTION,
+    images: [{ url: '/logo-desktop.webp', alt: 'Wayones' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Wayones | Secure P2P Crypto Trading',
+    description: WAYONES_DESCRIPTION,
+    images: ['/logo-desktop.webp'],
+  },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
     ],
-    apple: '/apple-touch-icon.png',
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
     shortcut: '/favicon.ico',
   },
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0f172a',
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -48,8 +71,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${sourceCodePro.variable}`} suppressHydrationWarning>
-      <body className={`font-body antialiased ${inter.className}`} suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="font-body antialiased" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
@@ -57,9 +80,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <NotificationsProvider>
-              <PriceProvider>
-                <I18nProvider>
+            <I18nProvider>
+              <NotificationsProvider>
+                <PriceProvider>
                   <BrandingProvider>
                     <WalletProvider>
                       <UserPresenceProvider>
@@ -68,9 +91,9 @@ export default function RootLayout({
                       </UserPresenceProvider>
                     </WalletProvider>
                   </BrandingProvider>
-                </I18nProvider>
-              </PriceProvider>
-            </NotificationsProvider>
+                </PriceProvider>
+              </NotificationsProvider>
+            </I18nProvider>
           </AuthProvider>
           <RadixToaster />
           <SonnerToaster position="top-right" richColors />

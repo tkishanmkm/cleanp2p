@@ -2,8 +2,8 @@ import { AuthForm } from '@/components/auth/auth-form';
 import { ModeToggle } from '@/components/mode-toggle';
 
 export const metadata = {
-  title: 'Sign Up | Paxones',
-  description: 'Create a free account on Paxones.',
+  title: 'Sign Up',
+  description: 'Create a free account on Wayones.',
 };
 
 export default function SignupPage() {

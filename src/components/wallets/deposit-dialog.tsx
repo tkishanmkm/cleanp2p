@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Copy, Loader2, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { useAuth } from '@/components/providers/auth-provider';
+import { useI18n } from '@/context/i18n-context';
 import { supabase } from '@/lib/supabase/client';
 import type { CryptoCurrency, UserWallet } from '@/lib/types';
 import { getActiveDepositAddress } from '@/lib/supabase/db';
@@ -84,6 +85,7 @@ function mapChainForProvisioning(assetCode: string, chainCode: string): 'EVM' | 
 }
 
 export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDialogProps) {
+  const { t } = useI18n();
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -190,15 +192,15 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
         return;
       }
 
-      throw new Error(provData?.error || 'Could not retrieve a deposit address for this network. Please try again.');
+      throw new Error(provData?.error || t('depositDialog.addressFetchError'));
     } catch (err: any) {
       console.error("Deposit address retrieval failed:", err);
-      setErrorMessage(err?.message || "Failed to generate deposit address.");
+      setErrorMessage(err?.message || t('depositDialog.failedToGenerate'));
       setDepositAddress('');
     } finally {
       setIsLoading(false);
     }
-  }, [effectiveAsset]);
+  }, [effectiveAsset, t]);
 
   useEffect(() => {
     if (open && selectedChain) {
@@ -214,7 +216,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
     if (!depositAddress) return;
     navigator.clipboard.writeText(depositAddress);
     setCopied(true);
-    toast({ title: "Address Copied", description: "Deposit address copied to clipboard." });
+    toast({ title: t('depositDialog.copiedToastTitle'), description: t('depositDialog.copiedToastDescription') });
     setTimeout(() => setCopied(false), 2500);
   };
 
@@ -227,9 +229,9 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
           <div className="flex items-center gap-3">
             <CryptoLogo crypto={effectiveAsset} className="h-7 w-7" />
             <div>
-              <DialogTitle>Deposit {effectiveAsset}</DialogTitle>
+              <DialogTitle>{t('depositDialog.title').replace('{asset}', effectiveAsset)}</DialogTitle>
               <DialogDescription>
-                Send only {effectiveAsset} to this personal deposit address.
+                {t('depositDialog.description').replace('{asset}', effectiveAsset)}
               </DialogDescription>
             </div>
           </div>
@@ -239,16 +241,16 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
           {availableChains.length > 1 && (
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Select Network
+                {t('depositDialog.selectNetwork')}
               </label>
               <Select value={selectedChain} onValueChange={(val) => setSelectedChain(val)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select network" />
+                  <SelectValue placeholder={t('depositDialog.selectNetworkPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {availableChains.map((c) => (
                     <SelectItem key={c} value={c}>
-                      {c} Network
+                      {t('depositDialog.networkOption').replace('{network}', c)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -259,8 +261,8 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-10 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-medium text-foreground">Generating unique deposit address...</p>
-              <p className="text-xs text-muted-foreground">Deriving secure address on {selectedChain || effectiveAsset} network</p>
+              <p className="text-sm font-medium text-foreground">{t('depositDialog.generatingAddress')}</p>
+              <p className="text-xs text-muted-foreground">{t('depositDialog.derivingAddress').replace('{network}', selectedChain || effectiveAsset)}</p>
             </div>
           ) : depositAddress ? (
             <div className="space-y-4">
@@ -274,7 +276,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
               {/* Address Box */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Deposit Address ({selectedChain})</span>
+                  <span>{t('depositDialog.addressLabel').replace('{network}', selectedChain)}</span>
                   <Badge variant="outline" className="text-[10px] uppercase font-mono">
                     {selectedChain}
                   </Badge>
@@ -290,7 +292,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
                     onClick={handleCopy}
                   >
                     {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                    <span className="ml-1.5 text-xs">{copied ? "Copied" : "Copy"}</span>
+                    <span className="ml-1.5 text-xs">{copied ? t('depositDialog.copiedButton') : t('common.copy')}</span>
                   </Button>
                 </div>
               </div>
@@ -298,15 +300,15 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
               {/* Network Details & Limits */}
               <div className="grid grid-cols-2 gap-2 text-xs p-3 rounded-lg bg-muted/40 border">
                 <div>
-                  <span className="text-muted-foreground block">Minimum Deposit</span>
+                  <span className="text-muted-foreground block">{t('depositDialog.minimumDeposit')}</span>
                   <span className="font-semibold text-foreground">
-                    {currentSpec?.minDeposit || 'No minimum'}
+                    {currentSpec?.minDeposit || t('depositDialog.noMinimum')}
                   </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground block">Confirmations</span>
+                  <span className="text-muted-foreground block">{t('depositDialog.confirmations')}</span>
                   <span className="font-semibold text-foreground">
-                    {currentSpec?.confirmations ? `${currentSpec.confirmations} Blocks` : 'Network Default'}
+                    {currentSpec?.confirmations ? t('depositDialog.blocks').replace('{count}', String(currentSpec.confirmations)) : t('depositDialog.networkDefault')}
                   </span>
                 </div>
               </div>
@@ -315,7 +317,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
               <div className="flex items-start gap-2.5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-xs">
                 <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Deposits are detected and credited automatically once the required blockchain confirmations are reached.
+                  {t('depositDialog.automaticCreditingNotice')}
                 </span>
               </div>
             </div>
@@ -323,9 +325,9 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
             <div className="space-y-4 py-2">
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Address Unavailable</AlertTitle>
+                <AlertTitle>{t('depositDialog.addressUnavailable')}</AlertTitle>
                 <AlertDescription>
-                  {errorMessage || "Unable to retrieve deposit address for this network. Please check your connection."}
+                  {errorMessage || t('depositDialog.unavailableMessage')}
                 </AlertDescription>
               </Alert>
               <Button
@@ -334,7 +336,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
                 onClick={() => fetchAddress(selectedChain)}
               >
                 <RefreshCw className="h-4 w-4" />
-                Retry Generation
+                {t('depositDialog.retryGeneration')}
               </Button>
             </div>
           )}

@@ -1,5 +1,5 @@
 {
-  "name": "nextn",
+  "name": "wayones",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,14 +10,15 @@
     "typecheck": "tsc --noEmit",
     "emergency:halt": "ts-node scripts/kill-switch.ts halt",
     "emergency:resume": "ts-node scripts/kill-switch.ts resume",
-    "workers:start": "node dist/worker.js",
-    "build:worker": "tsc",
-    "start:worker": "node dist/worker.js",
+    "workers:start": "node -e \"process.env.RUN_STANDALONE_WORKER='true'; require('./dist/worker.js')\"",
+    "build:worker": "esbuild src/worker.ts --bundle --platform=node --format=cjs --packages=external --alias:@=./src --outfile=dist/worker.js",
+    "start:worker": "node -e \"process.env.RUN_STANDALONE_WORKER='true'; require('./dist/worker.js')\"",
     "test:p2p": "tsx tests/p2p-trade-flow.test.ts",
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",
     "test:reconcile": "tsx tests/reconciliation.test.ts",
     "test:security": "tsx tests/security-verification.test.ts",
-    "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts"
+    "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts && tsx tests/2fa-session-edge.test.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",
@@ -25,6 +26,8 @@
     "@didit-protocol/sdk-web": "^0.3.0",
     "@floating-ui/dom": "^1.8.0",
     "@floating-ui/react": "^0.27.20",
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/source-code-pro": "5.3.1",
     "@hcaptcha/react-hcaptcha": "^2.2.0",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
@@ -54,7 +57,7 @@
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.48.0",
     "@types/pg": "^8.23.1",
-    "axios": "^1.7.9",
+    "axios": "^1.20.0",
     "bech32": "^2.0.0",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "^6.1.7",
@@ -68,7 +71,7 @@
     "embla-carousel-react": "^8.5.1",
     "ethers": "^6.13.0",
     "lucide-react": "^0.475.0",
-    "next": "14.2.23",
+    "next": "15.5.28",
     "next-themes": "^0.3.0",
     "node-cron": "^3.0.3",
     "otplib": "^12.0.1",
@@ -85,11 +88,13 @@
     "tailwindcss-animate": "^1.0.7",
     "tiny-secp256k1": "^2.2.4",
     "tronweb": "^6.0.0",
-    "uuid": "^9.0.1",
+    "uuid": "^11.1.1",
     "viem": "^2.23.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/typography": "^0.5.13",
     "@types/node": "^20.14.0",
     "@types/node-cron": "^3.0.11",
@@ -99,11 +104,19 @@
     "@types/speakeasy": "^2.0.10",
     "@types/uuid": "^9.0.8",
     "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.23",
+    "eslint-config-next": "15.5.28",
+    "eslint-plugin-security": "^4.2.0",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.0",
     "typescript": "^5.4.5"
+  },
+  "overrides": {
+    "axios": "$axios",
+    "postcss": "$postcss",
+    "postcss-selector-parser": "^6.1.5",
+    "minimatch": "11.0.1",
+    "uuid": "$uuid"
   }
 }

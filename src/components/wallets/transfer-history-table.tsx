@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { CryptoCurrency } from '@/lib/types';
+import { useI18n } from '@/context/i18n-context';
 import { supabase } from '@/lib/supabase/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +33,27 @@ function CoinBadgeLogo({ coin, className = 'h-5 w-5' }: { coin: string; classNam
     default:
       return <UsdtLogo className={className} />;
   }
+}
+
+const transferStatusTranslationKeys: Record<string, string> = {
+  completed: 'statusCompleted', complete: 'statusCompleted', successful: 'statusCompleted', success: 'statusCompleted', confirmed: 'statusCompleted', settled: 'statusCompleted',
+  pending: 'statusPending', queued: 'statusPending', created: 'statusPending', initiated: 'statusPending',
+  processing: 'statusProcessing', in_progress: 'statusProcessing',
+  failed: 'statusFailed', error: 'statusFailed',
+  cancelled: 'statusCancelled', canceled: 'statusCancelled',
+  rejected: 'statusRejected', refunded: 'statusRefunded', reversed: 'statusRefunded',
+};
+
+function transferStatusLabel(status: string, translate: (key: string) => string): string {
+  const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const key = transferStatusTranslationKeys[normalized];
+  return key ? translate('transferHistory.' + key) : (status || translate('transferHistory.statusUnknown'));
+}
+
+function formatTransferUsername(username: string, translate: (key: string) => string): string {
+  if (!username) return translate('transferHistory.trader');
+  if (username === translate('transferHistory.you') || username === translate('transferHistory.trader')) return username;
+  return '@' + username;
 }
 
 // Generate a consistent 12-character alphanumeric transfer ID
@@ -71,6 +93,7 @@ interface TransferHistoryListProps {
 }
 
 export function TransferHistoryList({ userId, type = 'all', onRowClick }: TransferHistoryListProps) {
+  const { t: translate, language } = useI18n();
   const [allTransfers, setAllTransfers] = useState<DisplayTransfer[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTransfer, setSelectedTransfer] = useState<DisplayTransfer | null>(null);
@@ -90,12 +113,16 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
             const mapped: DisplayTransfer[] = json.data.map((t: any) => {
               const isSent = t.type === 'SENT' || t.sender_id === userId;
               const formattedId = formatTransferId(t.public_id || t.transferId || t.id, t.created_at);
-              const resolvedSender = t.sender_username && !t.sender_username.startsWith('User_')
-                ? t.sender_username
-                : (isSent ? 'You' : (t.sender_username || 'Trader'));
-              const resolvedRecipient = t.recipient_username && !t.recipient_username.startsWith('User_')
-                ? t.recipient_username
-                : (!isSent ? 'You' : (t.recipient_username || 'Trader'));
+              const resolvedSender = isSent
+                ? translate('transferHistory.you')
+                : (t.sender_username && !t.sender_username.startsWith('User_') && t.sender_username !== 'Trader'
+                  ? t.sender_username
+                  : translate('transferHistory.trader'));
+              const resolvedRecipient = !isSent
+                ? translate('transferHistory.you')
+                : (t.recipient_username && !t.recipient_username.startsWith('User_') && t.recipient_username !== 'Trader'
+                  ? t.recipient_username
+                  : translate('transferHistory.trader'));
 
               return {
                 id: t.id,
@@ -141,7 +168,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
       if (userIdsToFetch.size > 0) {
         try {
           const { data: profs } = await supabase
-            .from('profiles')
+            .from('public_profiles')
             .select('id, username')
             .in('id', Array.from(userIdsToFetch));
           
@@ -158,8 +185,12 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
       const mapped: DisplayTransfer[] = (data || []).map((t: any) => {
         const isSent = t.sender_id === userId;
         const formattedId = formatTransferId(t.public_id || t.transfer_id || t.id, t.created_at);
-        const resolvedSender = profileMap[t.sender_id] || (t.sender_username && !t.sender_username.startsWith('User_') ? t.sender_username : (isSent ? 'You' : 'Trader'));
-        const resolvedRecipient = profileMap[t.recipient_id] || (t.recipient_username && !t.recipient_username.startsWith('User_') ? t.recipient_username : (!isSent ? 'You' : 'Trader'));
+        const resolvedSender = isSent
+          ? translate('transferHistory.you')
+          : (profileMap[t.sender_id] || (t.sender_username && !t.sender_username.startsWith('User_') && t.sender_username !== 'Trader' ? t.sender_username : translate('transferHistory.trader')));
+        const resolvedRecipient = !isSent
+          ? translate('transferHistory.you')
+          : (profileMap[t.recipient_id] || (t.recipient_username && !t.recipient_username.startsWith('User_') && t.recipient_username !== 'Trader' ? t.recipient_username : translate('transferHistory.trader')));
         
         return {
           id: t.id,
@@ -184,7 +215,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, translate]);
 
   const transfers = (allTransfers || []).filter((t) => {
     if (type === 'sent') return t.isSent;
@@ -224,7 +255,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
   if (!transfers || transfers.length === 0) {
     return (
       <p className="text-center text-muted-foreground py-8 text-sm">
-        No internal transfer history found.
+        {translate('transferHistory.empty')}
       </p>
     );
   }
@@ -237,20 +268,20 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
           <Table>
             <TableHeader className="bg-blue-500/5 dark:bg-blue-950/20">
               <TableRow className="hover:bg-transparent border-blue-500/10">
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Asset</TableHead>
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Transfer ID</TableHead>
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Recipient / Sender</TableHead>
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Amount</TableHead>
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Status</TableHead>
-                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Date & Time</TableHead>
-                <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">Action</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.asset')}</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.transferId')}</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.recipientSender')}</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.amount')}</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.status')}</TableHead>
+                <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.dateTime')}</TableHead>
+                <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">{translate('transferHistory.action')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {transfers.map((t) => {
                 const dateObj = t.createdAt ? new Date(t.createdAt) : null;
-                const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-                const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+                const dateStr = dateObj ? dateObj.toLocaleDateString(language) : translate('transferHistory.notAvailable');
+                const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
                 return (
                   <TableRow
@@ -265,7 +296,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                           <div className="font-semibold text-sm text-foreground flex items-center gap-1.5">
                             {t.crypto}
                             <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
-                              Internal
+                              {translate('transferHistory.internal')}
                             </span>
                           </div>
                         </div>
@@ -283,14 +314,14 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                         {t.isSent ? (
                           <>
                             <ArrowUpRight className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                            <span className="text-xs text-muted-foreground">To:</span>
-                            <span className="font-medium text-foreground">@{t.recipientUsername}</span>
+                            <span className="text-xs text-muted-foreground">{translate('transferHistory.to')}</span>
+                            <span className="font-medium text-foreground">{formatTransferUsername(t.recipientUsername, translate)}</span>
                           </>
                         ) : (
                           <>
                             <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                            <span className="text-xs text-muted-foreground">From:</span>
-                            <span className="font-medium text-foreground">@{t.senderUsername}</span>
+                            <span className="text-xs text-muted-foreground">{translate('transferHistory.from')}</span>
+                            <span className="font-medium text-foreground">{formatTransferUsername(t.senderUsername, translate)}</span>
                           </>
                         )}
                       </div>
@@ -310,7 +341,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                         variant="outline"
                         className={cn('capitalize text-xs font-medium', statusColors[t.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                       >
-                        {t.status}
+                        {transferStatusLabel(t.status, translate)}
                       </Badge>
                     </TableCell>
 
@@ -328,7 +359,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                         className="h-8 gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
                       >
                         <Eye className="h-3.5 w-3.5" />
-                        <span>View</span>
+                        <span>{translate('transferHistory.view')}</span>
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -342,8 +373,8 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
         <div className="grid gap-3 md:hidden">
           {transfers.map((t) => {
             const dateObj = t.createdAt ? new Date(t.createdAt) : null;
-            const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-            const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const dateStr = dateObj ? dateObj.toLocaleDateString(language) : translate('transferHistory.notAvailable');
+            const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) : '';
 
             return (
               <div
@@ -358,7 +389,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                       <div className="font-bold text-sm text-foreground flex items-center gap-1.5">
                         {t.crypto}
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
-                          Internal
+                          {translate('transferHistory.internal')}
                         </span>
                       </div>
                       <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
@@ -378,13 +409,13 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                       variant="outline"
                       className={cn('capitalize text-[10px] font-medium mt-1', statusColors[t.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                     >
-                      {t.status}
+                      {transferStatusLabel(t.status, translate)}
                     </Badge>
                   </div>
                 </div>
 
                 <div className="pt-2 border-t border-border/40 flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground text-[11px]">Transfer ID:</span>
+                  <span className="text-muted-foreground text-[11px]">{translate('transferHistory.transferId')}:</span>
                   <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 tracking-wider">
                     {t.transferId}
                   </span>
@@ -392,10 +423,10 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
 
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground text-[11px]">
-                    {t.isSent ? 'Recipient:' : 'Sender:'}
+                    {t.isSent ? translate('transferHistory.recipientUsername') : translate('transferHistory.senderUsername')}
                   </span>
                   <span className="font-medium text-foreground">
-                    @{t.isSent ? t.recipientUsername : t.senderUsername}
+                    {formatTransferUsername(t.isSent ? t.recipientUsername : t.senderUsername, translate)}
                   </span>
                 </div>
 
@@ -407,7 +438,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                     onClick={(e) => { e.stopPropagation(); handleRowSelect(t); }}
                   >
                     <Eye className="h-3.5 w-3.5" />
-                    <span>View Details</span>
+                    <span>{translate('transferHistory.viewDetails')}</span>
                   </Button>
                 </div>
               </div>
@@ -428,10 +459,10 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
               )}
               <div>
                 <DialogTitle className="text-lg font-bold text-foreground">
-                  Transfer Details
+                  {translate('transferHistory.transferDetails')}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Internal instant transfer on Paxones
+                  {translate('transferHistory.subtitle')}
                 </DialogDescription>
               </div>
             </div>
@@ -441,7 +472,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
             <div className="space-y-3.5 text-sm divide-y divide-border/50 py-1">
               {/* Amount */}
               <div className="flex justify-between items-center pt-2">
-                <span className="text-xs font-medium text-muted-foreground">Transfer Amount:</span>
+                <span className="text-xs font-medium text-muted-foreground">{translate('transferHistory.transferAmount')}</span>
                 <span className={cn(
                   'font-mono font-bold text-base',
                   selectedTransfer.isSent ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
@@ -450,13 +481,13 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                 </span>
               </div>
 
-              {/* Fee (1.5%) */}
+              {/* Historical fee amount stored on the transfer record. The current
+                  platform rate may differ from the rate applied to this past transfer. */}
               {selectedTransfer.isSent && (
                 <>
                   <div className="flex justify-between items-center pt-3">
-                    <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                      <span>PaxOnes Fee:</span>
-                      <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">1.5%</span>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      <span>{translate('transferHistory.WayonesFee')}</span>
                     </span>
                     <span className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
                       {selectedTransfer.fee} {selectedTransfer.crypto}
@@ -464,7 +495,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                   </div>
 
                   <div className="flex justify-between items-center pt-3">
-                    <span className="text-xs font-bold text-foreground">Total Deducted:</span>
+                    <span className="text-xs font-bold text-foreground">{translate('transferHistory.totalDeducted')}</span>
                     <span className="font-mono font-bold text-xs text-foreground">
                       {(selectedTransfer.amount + selectedTransfer.fee).toFixed(8)} {selectedTransfer.crypto}
                     </span>
@@ -474,18 +505,18 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
 
               {/* Status */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Status:</span>
+                <span className="text-xs font-medium text-muted-foreground">{translate('transferHistory.statusLabel')}</span>
                 <Badge
                   variant="outline"
                   className={cn('capitalize text-xs font-medium', statusColors[selectedTransfer.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                 >
-                  {selectedTransfer.status}
+                  {transferStatusLabel(selectedTransfer.status, translate)}
                 </Badge>
               </div>
 
               {/* 12-char Transfer ID */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Transfer ID (12-char):</span>
+                <span className="text-xs font-medium text-muted-foreground">{translate('transferHistory.transferId12')}</span>
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 tracking-wider">
                     {selectedTransfer.transferId}
@@ -493,7 +524,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                   <button
                     onClick={() => copyToClipboard(selectedTransfer.transferId, 'tid')}
                     className="text-muted-foreground hover:text-foreground p-1 transition"
-                    title="Copy Transfer ID"
+                    title={translate('transferHistory.copyTooltip')}
                   >
                     {copiedField === 'tid' ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
@@ -503,30 +534,30 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
               {/* Recipient / Sender Username */}
               <div className="flex justify-between items-center pt-3">
                 <span className="text-xs font-medium text-muted-foreground">
-                  {selectedTransfer.isSent ? 'Recipient Username:' : 'Sender Username:'}
+                  {selectedTransfer.isSent ? translate('transferHistory.recipientUsername') : translate('transferHistory.senderUsername')}
                 </span>
                 <span className="text-xs font-bold px-2 py-0.5 rounded bg-muted font-mono text-foreground flex items-center gap-1">
                   <UserIcon className="h-3 w-3 text-blue-500" />
-                  @{selectedTransfer.isSent ? selectedTransfer.recipientUsername : selectedTransfer.senderUsername}
+                  {formatTransferUsername(selectedTransfer.isSent ? selectedTransfer.recipientUsername : selectedTransfer.senderUsername, translate)}
                 </span>
               </div>
 
               {/* Date & Time */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Date & Time:</span>
+                <span className="text-xs font-medium text-muted-foreground">{translate('transferHistory.dateTimeLabel')}</span>
                 <span className="text-xs font-medium text-foreground">
-                  {selectedTransfer.createdAt ? new Date(selectedTransfer.createdAt).toLocaleString(undefined, {
+                  {selectedTransfer.createdAt ? new Date(selectedTransfer.createdAt).toLocaleString(language, {
                     dateStyle: 'medium',
                     timeStyle: 'medium',
-                  }) : 'N/A'}
+                  }) : translate('transferHistory.notAvailable')}
                 </span>
               </div>
 
               {/* Network / Type */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Transfer Type:</span>
+                <span className="text-xs font-medium text-muted-foreground">{translate('transferHistory.transferType')}</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                  Off-chain Instant Internal
+                  {translate('transferHistory.offchainInstantInternal')}
                 </span>
               </div>
             </div>
@@ -538,7 +569,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
               className="w-full h-9 text-xs border-border/80"
               onClick={() => setIsDialogOpen(false)}
             >
-              Close
+              {translate('transferHistory.close')}
             </Button>
           </div>
         </DialogContent>

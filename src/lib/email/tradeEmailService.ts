@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export interface NewTradeEmailPayload {
@@ -110,11 +112,11 @@ function buildTradeEmailPlainText(params: {
   const displayRefId = publicId || tradeId;
   const roleText =
     recipientRole === 'buyer'
-      ? 'Your P2P trade request has been successfully initiated on Paxones. The crypto asset is safely locked in escrow.'
-      : 'A new P2P trade request has been initiated with you on Paxones. The crypto asset is safely locked in escrow.';
+      ? 'Your P2P trade request has been successfully initiated on Wayones. The crypto asset is safely locked in escrow.'
+      : 'A new P2P trade request has been initiated with you on Wayones. The crypto asset is safely locked in escrow.';
 
   return `
-New P2P Trade Initiated — Paxones
+New P2P Trade Initiated — Wayones
 
 ${roleText}
 
@@ -129,14 +131,14 @@ Exchange Rate:  ${formattedPrice} ${formattedFiatCurrency} / ${formattedAsset}
 Payment Method: ${paymentMethod || 'Bank Transfer'}
 Created (UTC):  ${dateFormattedUtc}
 
-View and manage your trade securely on Paxones:
+View and manage your trade securely on Wayones:
 ${tradeUrl}
 
 Security Notice:
 Never share your password, private keys, seed phrase, or 2FA codes with anyone.
-If you didn't initiate or expect this trade, please review your account and contact support@paxones.com.
+If you didn't initiate or expect this trade, please review your account and contact support@wayones.com.
 
-© 2026 Paxones. Secure Peer-to-Peer Crypto Marketplace.
+© 2026 Wayones. Secure Peer-to-Peer Crypto Marketplace.
 `.trim();
 }
 
@@ -173,8 +175,8 @@ function buildTradeEmailHtml(params: {
 
   const subtitle =
     recipientRole === 'buyer'
-      ? 'Your P2P trade request has been successfully initiated on Paxones. The crypto asset is safely locked in escrow.'
-      : 'A new P2P trade request has been initiated with you on Paxones. The crypto asset is safely locked in escrow.';
+      ? 'Your P2P trade request has been successfully initiated on Wayones. The crypto asset is safely locked in escrow.'
+      : 'A new P2P trade request has been initiated with you on Wayones. The crypto asset is safely locked in escrow.';
 
   const displayRefId = escapeHtml(publicId || tradeId);
   const displayBuyer = escapeHtml(buyerUsername);
@@ -205,7 +207,7 @@ function buildTradeEmailHtml(params: {
           <!-- Header Card / Logo -->
           <tr>
             <td align="center" style="padding-bottom: 24px; background: linear-gradient(180deg, #131b31 0%, #0f1423 100%); padding-top: 12px; border-radius: 12px;">
-              <img src="https://eaiwgfxoiwxepinvcykg.supabase.co/storage/v1/object/public/public-assets/paxones%20win.png" alt="Paxones Logo" width="160" style="display: block; width: 160px; max-width: 100%; height: auto; border: 0;" />
+              <img src="https://wayones.com/logo-desktop.webp" alt="Wayones Logo" width="160" style="display: block; width: 160px; max-width: 100%; height: auto; border: 0;" />
             </td>
           </tr>
 
@@ -287,8 +289,8 @@ function buildTradeEmailHtml(params: {
           <!-- Footer -->
           <tr>
             <td align="center" style="padding-top: 28px; border-top: 1px solid #1e2640; font-size: 12px; color: #64748b; line-height: 1.6;">
-              <p style="margin: 0 0 6px 0;">Need help? Contact <a href="mailto:support@paxones.com" style="color: #a78bfa; text-decoration: none;">support@paxones.com</a></p>
-              <p style="margin: 0;">&copy; 2026 Paxones. Secure Peer-to-Peer Crypto Marketplace.</p>
+              <p style="margin: 0 0 6px 0;">Need help? Contact <a href="mailto:support@wayones.com" style="color: #a78bfa; text-decoration: none;">support@wayones.com</a></p>
+              <p style="margin: 0;">&copy; 2026 Wayones. Secure Peer-to-Peer Crypto Marketplace.</p>
             </td>
           </tr>
 
@@ -359,20 +361,11 @@ export async function sendNewTradeNotificationEmail(
     const buyerUsername = formatUsername(rawBuyerUsername, 'Buyer');
 
     // 2. Construct Canonical Authenticated Trade URL
-    // The production URL MUST always resolve to https://paxones.com/trade/{canonicalPublicTradeId}
-    // Strictly prevent development / AI Studio / localhost internal preview hostnames from leaking into customer emails
-    const configuredSiteUrl = (
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.SITE_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.APP_URL ||
-      'https://paxones.com'
-    ).trim().replace(/\/$/, '');
-
-    const isInternalPreview = /ais-|aistudio|google\.com|run\.app|localhost|127\.0\.0\.1/i.test(configuredSiteUrl);
-    const baseSiteUrl = isInternalPreview ? 'https://paxones.com' : (configuredSiteUrl || 'https://paxones.com');
+    // The production URL MUST always resolve to https://wayones.com/trade/{canonicalPublicTradeId}
+    // Customer-facing trade links always use the canonical Wayones origin.
+    const baseSiteUrl = 'https://wayones.com';
     const canonicalPublicTradeId = String(publicId || tradeId);
-    const tradeUrl = `${baseSiteUrl}/trade/${encodeURIComponent(canonicalPublicTradeId)}`;
+    const tradeUrl = new URL(`/trade/${encodeURIComponent(canonicalPublicTradeId)}`, baseSiteUrl).toString();
 
     // Format numbers
     const formattedCrypto = Number(cryptoAmount || 0).toLocaleString('en-US', {
@@ -391,11 +384,25 @@ export async function sendNewTradeNotificationEmail(
     const formattedFiatCurrency = String(fiatCurrency || 'USD').toUpperCase();
     const dateFormattedUtc = formatUtcDate(createdAt);
 
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      process.env.SUPABASE_URL ||
-      'https://eaiwgfxoiwxepinvcykg.supabase.co';
-    const edgeFunctionUrl = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/send-email`;
+    const rawSupabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+    let parsedSupabaseUrl: URL;
+    try {
+      parsedSupabaseUrl = new URL(rawSupabaseUrl);
+    } catch {
+      return { success: false, results: [], error: 'Supabase URL is not configured correctly.' };
+    }
+    if (
+      parsedSupabaseUrl.protocol !== 'https:' ||
+      !parsedSupabaseUrl.hostname.toLowerCase().endsWith('.supabase.co') ||
+      parsedSupabaseUrl.username ||
+      parsedSupabaseUrl.password ||
+      (parsedSupabaseUrl.port !== '' && parsedSupabaseUrl.port !== '443') ||
+      parsedSupabaseUrl.search ||
+      parsedSupabaseUrl.hash
+    ) {
+      return { success: false, results: [], error: 'Supabase URL is not an approved HTTPS endpoint.' };
+    }
+    const edgeFunctionUrl = new URL('/functions/v1/send-email', parsedSupabaseUrl.origin).toString();
     const emailAuthSecret = process.env.EMAIL_FUNCTION_AUTH_SECRET;
 
     if (!emailAuthSecret) {
@@ -421,14 +428,12 @@ export async function sendNewTradeNotificationEmail(
       if (!isDuplicate) {
         targets.push({ email: sellerEmail, role: 'seller' });
       } else {
-        console.log(
-          `[tradeEmailService] Buyer and Seller share email address (${sellerEmail}). Sending single notification.`
-        );
+        console.log('[tradeEmailService] Buyer and Seller share an email destination. Sending one notification.');
       }
     }
 
     if (targets.length === 0) {
-      console.warn('[tradeEmailService] No valid buyer or seller email addresses found for trade:', tradeId);
+      console.warn('[tradeEmailService] No valid email recipients were available for the new trade notification.');
       return { success: false, results: [], error: 'No recipient email addresses found' };
     }
 
@@ -469,13 +474,15 @@ export async function sendNewTradeNotificationEmail(
 
         const response = await fetch(edgeFunctionUrl, {
           method: 'POST',
+          cache: 'no-store',
+          signal: AbortSignal.timeout(10_000),
           headers: {
             'Content-Type': 'application/json',
             'X-Email-Function-Secret': emailAuthSecret,
           },
           body: JSON.stringify({
             to: target.email,
-            subject: `Paxones P2P Trade Initiated — ${publicId || tradeId}`,
+            subject: `Wayones P2P Trade Initiated — ${publicId || tradeId}`,
             html,
             text: plainText,
           }),
@@ -485,19 +492,19 @@ export async function sendNewTradeNotificationEmail(
 
         if (!response.ok || !resData.success) {
           console.error(
-            `[tradeEmailService] Failed to dispatch email to ${target.role} (${target.email}):`,
+            `[tradeEmailService] Failed to dispatch email to ${target.role}:`,
             response.status,
-            resData
+            { code: typeof resData?.code === 'string' ? resData.code.slice(0, 80) : null }
           );
           results.push({
             recipient: target.email,
             role: target.role,
             success: false,
-            error: resData.error || `HTTP ${response.status}`,
+            error: `Email delivery failed (HTTP ${response.status}).`,
           });
         } else {
           console.log(
-            `[tradeEmailService] Success: Trade initiation email sent to ${target.role} (${target.email}) for trade ${publicId || tradeId} (Message ID: ${resData.messageId})`
+            `[tradeEmailService] Trade initiation email sent to ${target.role} (provider message ID: ${String(resData.messageId || '').slice(0, 80)}).`
           );
           results.push({
             recipient: target.email,
@@ -508,14 +515,14 @@ export async function sendNewTradeNotificationEmail(
         }
       } catch (dispatchErr: any) {
         console.error(
-          `[tradeEmailService] Exception dispatching email to ${target.role} (${target.email}):`,
-          dispatchErr?.message || dispatchErr
+          `[tradeEmailService] Exception dispatching email to ${target.role}:`,
+          dispatchErr instanceof Error ? dispatchErr.name : 'UnknownError'
         );
         results.push({
           recipient: target.email,
           role: target.role,
           success: false,
-          error: dispatchErr?.message || 'Dispatch exception',
+          error: 'Email delivery failed due to a network or provider error.',
         });
       }
     }
@@ -525,8 +532,8 @@ export async function sendNewTradeNotificationEmail(
   } catch (err: any) {
     console.error(
       '[tradeEmailService] Unexpected error in sendNewTradeNotificationEmail:',
-      err?.message || err
+      err instanceof Error ? err.name : 'UnknownError'
     );
-    return { success: false, results, error: err?.message || 'Unknown error' };
+    return { success: false, results, error: 'Email notification could not be dispatched.' };
   }
 }

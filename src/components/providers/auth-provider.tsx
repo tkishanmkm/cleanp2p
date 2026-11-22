@@ -224,8 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const isUserAdmin = Boolean(
       profile?.is_admin ||
       profile?.role === 'admin' ||
-      supabaseUser.user_metadata?.role === 'admin' ||
-      supabaseUser.app_metadata?.role === 'admin'
+      supabaseUser.app_metadata?.role === 'admin' ||
+      supabaseUser.app_metadata?.is_admin === true
     );
 
     const effectiveUsername = profile?.username || supabaseUser.user_metadata?.username || (supabaseUser.email ? supabaseUser.email.split('@')[0] : 'User');

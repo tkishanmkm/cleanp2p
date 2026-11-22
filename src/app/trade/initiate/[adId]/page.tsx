@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeftRight, ShieldCheck, Tag, FileText, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -17,6 +17,8 @@ export default function TradeInitiationPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Retain the same key when retrying an uncertain request; rotate it when trade inputs change.
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     async function fetchAd() {
@@ -43,6 +45,7 @@ export default function TradeInitiationPage() {
   }, [adId]);
 
   const handleFiatChange = (val: string) => {
+    idempotencyKeyRef.current = null;
     setFiatAmount(val);
     const num = parseFloat(val);
     if (!isNaN(num) && ad && ad.price > 0) {
@@ -53,6 +56,7 @@ export default function TradeInitiationPage() {
   };
 
   const handleCryptoChange = (val: string) => {
+    idempotencyKeyRef.current = null;
     setCryptoAmount(val);
     const num = parseFloat(val);
     if (!isNaN(num) && ad && ad.price > 0) {
@@ -63,6 +67,7 @@ export default function TradeInitiationPage() {
   };
 
   const handleInitiateTrade = async () => {
+    if (submitting) return;
     setErrorMsg(null);
     const fiatNum = parseFloat(fiatAmount);
     
@@ -73,19 +78,24 @@ export default function TradeInitiationPage() {
 
     setSubmitting(true);
     try {
+      const idempotencyKey = idempotencyKeyRef.current || crypto.randomUUID();
+      idempotencyKeyRef.current = idempotencyKey;
       const res = await fetch('/api/trades/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
           ad_id: ad.id,
           fiat_amount: fiatNum,
           crypto_amount: parseFloat(cryptoAmount) || (ad.price > 0 ? fiatNum / ad.price : 0),
+          idempotency_key: idempotencyKey,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initiate trade.');
 
+      // The RPC confirmed creation; a later retry must use a fresh key.
+      idempotencyKeyRef.current = null;
       // Redirect to active trade chat room
       const targetTradeId = data.trade_id || data.id;
       router.push(`/trade/${targetTradeId}`);

@@ -31,12 +31,12 @@ export default function AcademyPage() {
   const guides = [
     {
       id: 'how-p2p-escrow-works',
-      title: 'How PaxOnes P2P Escrow Works: Complete Security Guide',
+      title: 'How Wayones P2P Escrow Works: Complete Security Guide',
       category: 'escrow',
       readTime: '4 min read',
-      excerpt: 'Learn how PaxOnes locks cryptocurrency in smart escrow the moment a trade initiates, protecting both buyers and sellers from counterparty default.',
+      excerpt: 'Learn how Wayones locks cryptocurrency in smart escrow the moment a trade initiates, protecting both buyers and sellers from counterparty default.',
       content: [
-        'When a buyer clicks "Buy", the seller\'s cryptocurrency is automatically deducted and locked into the PaxOnes Escrow Smart Vault.',
+        'When a buyer clicks "Buy", the seller\'s cryptocurrency is automatically deducted and locked into the Wayones Escrow Smart Vault.',
         'The buyer makes the fiat payment directly to the seller via their agreed banking or payment method.',
         'Once payment is sent, the buyer clicks "Transferred, Notify Seller". The timer pauses and the trade locks.',
         'The seller verifies receipt of the exact fiat amount in their personal bank account before clicking "Release Escrow".'
@@ -47,7 +47,7 @@ export default function AcademyPage() {
       title: 'Dispute Resolution Masterclass: Submitting Winning Evidence',
       category: 'disputes',
       readTime: '6 min read',
-      excerpt: 'Step-by-step instructions on what evidence PaxOnes moderators require to resolve payment disputes, chargebacks, and unresponsive trades.',
+      excerpt: 'Step-by-step instructions on what evidence Wayones moderators require to resolve payment disputes, chargebacks, and unresponsive trades.',
       content: [
         'Bank Transfers: Provide an unedited PDF statement or official wire receipt showing beneficiary name, account number, reference code, and debit confirmation.',
         'UPI / Instant Transfers: Submit a full screenshot displaying the 12-digit UTR/Ref transaction number and recipient UPI ID.',
@@ -64,7 +64,7 @@ export default function AcademyPage() {
       content: [
         'Payment Account Verification: Always double check payment reference numbers and verify sender payment confirmations directly within your banking portal.',
         'Fake Receipt Detection: Never rely solely on screenshots or SMS notifications. Always log directly into your banking app to verify balance updates.',
-        'Strictly No Off-Platform Chat: Never communicate via Telegram, WhatsApp, or email. Trades conducted outside PaxOnes chat forfeit escrow coverage.'
+        'Strictly No Off-Platform Chat: Never communicate via Telegram, WhatsApp, or email. Trades conducted outside Wayones chat forfeit escrow coverage.'
       ]
     },
     {
@@ -95,7 +95,7 @@ export default function AcademyPage() {
       <div className="text-center space-y-4 max-w-3xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
           <GraduationCap className="h-4 w-4" />
-          <span>PaxOnes Academy</span>
+          <span>Wayones Academy</span>
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
@@ -188,13 +188,13 @@ export default function AcademyPage() {
         </div>
 
         <blockquote className="text-sm sm:text-base italic text-slate-200 leading-relaxed border-l-2 border-amber-500 pl-4">
-          &ldquo;Our fundamental mission at PaxOnes is establishing uncompromising escrow integrity and frictionless liquidity for global traders. 
+          &ldquo;Our fundamental mission at Wayones is establishing uncompromising escrow integrity and frictionless liquidity for global traders.
           Every peer-to-peer exchange is backed by cryptographic custody, transparent dispute guidelines, and stringent compliance standards to eliminate counterparty risk.&rdquo;
         </blockquote>
 
         <div className="pt-2 text-xs text-slate-400 font-sans">
           <p className="font-bold text-white text-sm">Samuel Parker</p>
-          <p className="text-slate-400">Chief Executive Officer, PaxOnes Global</p>
+          <p className="text-slate-400">Chief Executive Officer, Wayones Global</p>
         </div>
       </div>
     </div>

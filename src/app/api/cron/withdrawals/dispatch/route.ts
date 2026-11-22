@@ -23,6 +23,16 @@ export async function GET(req: Request) {
     console.log('[Cron Worker] Executing withdrawal dispatcher job...');
     const result = await processPendingWithdrawals();
 
+    if (result.error) {
+      return NextResponse.json({
+        success: false,
+        code: "WITHDRAWAL_DISPATCH_BLOCKED",
+        error: "The withdrawal dispatcher could not safely claim or process the queue.",
+        timestamp: new Date().toISOString(),
+        result,
+      }, { status: 503 });
+    }
+
     return NextResponse.json({ success: true, timestamp: new Date().toISOString(), result });
   } catch (err: any) {
     console.error('[Cron Dispatcher Error]:', err.message);

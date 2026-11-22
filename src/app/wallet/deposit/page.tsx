@@ -387,7 +387,7 @@ export default function DepositAddressPrecheckPage() {
             <div className="space-y-1">
               <p className="font-semibold text-neutral-200">Shared EVM Address Architecture</p>
               <p>
-                Ethereum (ETH), Tether USD ERC-20, and Tether USD BEP-20 all deterministically map to your single EVM address (m/44&apos;/60&apos;/0&apos;/0/{depositData?.walletIndex || 1}). Deposits on respective chains are automatically detected and credited by the Paxones on-chain engine.
+                Ethereum (ETH), Tether USD ERC-20, and Tether USD BEP-20 all deterministically map to your single EVM address (m/44&apos;/60&apos;/0&apos;/0/{depositData?.walletIndex || 1}). Deposits on respective chains are automatically detected and credited by the Wayones on-chain engine.
               </p>
             </div>
           </div>

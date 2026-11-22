@@ -28,8 +28,8 @@ const TABLES_TO_BACKUP = [
   'deposits',
   'withdrawals',
   'transfers',
-  'crypto_deposit_addresses',
-  'app_config',
+  'deposit_addresses',
+  'app_settings',
 ];
 
 export default function DataManagementPage() {

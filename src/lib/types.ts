@@ -2,6 +2,15 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+/** UI wallet balance for one asset/network combination. */
+export interface UserWallet {
+  id?: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  balance: number;
+  lockedBalance: number;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
@@ -12,6 +21,43 @@ export interface CurrencyConfig {
 export interface UserProfile {
   id: string;
   username: string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
+  kyc_status?: string | null;
+  verification_tier?: string | number | null;
+  blockedUsers?: string[];
+  blocked_users?: string[];
+  tradeVolume?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  photoURL?: string | null;
+  photo_url?: string | null;
+  avatar_url?: string | null;
+  avatarUrl?: string | null;
+  email?: string | null;
+  is_online?: boolean;
+  last_seen?: string | null;
+  last_seen_at?: string | null;
+  last_active?: string | null;
+  avgPayTime?: number;
+  avg_payment_minutes?: number;
+  avg_release_minutes?: number;
+  btc_balance?: number;
+  eth_balance?: number;
+  ltc_balance?: number;
+  usdt_balance?: number;
+  sol_balance?: number;
+  total_trade_volume_usd?: number;
+  total_volume?: number;
+  avg_pay_time_seconds?: number;
+  avg_release_time_seconds?: number;
+  is_email_verified?: boolean;
+  email_verified?: boolean;
+  email_confirmed_at?: string | null;
+  country_code?: string | null;
+  blocked_by_count?: number;
+  blocking_count?: number;
   country?: string;
   feedbackScore: number;
   avgReleaseTime: number; // in minutes
@@ -25,8 +71,13 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
+    photo_url?: string;
+    created_at?: string;
+    createdAt?: string;
+    last_seen?: string | null;
     feedbackScore: number;
     positiveFeedback?: number;
     negativeFeedback?: number;
@@ -71,6 +122,7 @@ export interface InitiateTradePayload {
 
 export type SupportedCrypto = {
   name: CryptoCurrency;
+  symbol?: string;
   chains: string[];
 };
 
@@ -116,7 +168,7 @@ export type Withdrawal = {
   address: string;
   amount: number;
   fee?: number;
-  status: 'pending' | 'approved' | 'declined' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'PENDING_APPROVAL' | 'queued' | 'approved' | 'declined' | 'cancelled';
   txHash?: string;
   adminId?: string;
   createdAt: string;
@@ -128,6 +180,9 @@ export type User = {
   oldUserId?: string;
   fullName: string;
   dob: string;
+  username?: string;
+  email?: string;
+  isSuspended?: boolean;
   country?: string;
   ipBasedCountry?: string;
   photoURL?: string;
@@ -303,5 +358,6 @@ export type Notification = {
   isRead: boolean;
   senderPhotoURL?: string;
   senderUsername?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };

@@ -1,0 +1,1 @@
+ALTER FUNCTION public.admin_update_user_role(uuid, uuid, text) SET search_path = ''; ALTER FUNCTION public.verify_admin_login(uuid, uuid) SET search_path = '';

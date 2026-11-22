@@ -256,6 +256,7 @@ SET search_path = public, auth, pg_temp
 AS $$
 DECLARE
     v_withdrawal RECORD;
+    v_withdrawal_pair RECORD;
     v_total_deducted NUMERIC(36, 18);
     v_fee NUMERIC(36, 18) := 0;
     v_balance_after NUMERIC(36, 18);
@@ -263,6 +264,10 @@ DECLARE
 BEGIN
     IF p_withdrawal_id IS NULL THEN
         RAISE EXCEPTION 'Withdrawal ID is required';
+    END IF;
+
+    IF NULLIF(TRIM(p_tx_hash), '') IS NULL THEN
+        RAISE EXCEPTION 'Confirmed transaction hash is required to complete withdrawal %', p_withdrawal_id;
     END IF;
 
     SELECT *
@@ -283,8 +288,40 @@ BEGIN
         RAISE EXCEPTION 'Withdrawal % not found', p_withdrawal_id;
     END IF;
 
+    -- Lock the companion row and require both financial records to agree before settlement.
+    SELECT id, status, tx_hash, txid
+    INTO v_withdrawal_pair
+    FROM public.withdrawals
+    WHERE id = p_withdrawal_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Companion withdrawal record % not found; refusing completion', p_withdrawal_id;
+    END IF;
+
+    IF NULLIF(BTRIM(COALESCE(v_withdrawal.tx_hash, '')), '') IS NOT NULL
+       AND BTRIM(v_withdrawal.tx_hash) <> BTRIM(p_tx_hash) THEN
+        RAISE EXCEPTION 'Confirmed transaction hash does not match persisted on-chain hash for withdrawal %', p_withdrawal_id;
+    END IF;
+    IF NULLIF(BTRIM(COALESCE(v_withdrawal_pair.tx_hash, '')), '') IS NOT NULL
+       AND BTRIM(v_withdrawal_pair.tx_hash) <> BTRIM(p_tx_hash) THEN
+        RAISE EXCEPTION 'Confirmed transaction hash does not match persisted withdrawal hash for withdrawal %', p_withdrawal_id;
+    END IF;
+    IF NULLIF(BTRIM(COALESCE(v_withdrawal_pair.txid, '')), '') IS NOT NULL
+       AND BTRIM(v_withdrawal_pair.txid) <> BTRIM(p_tx_hash) THEN
+        RAISE EXCEPTION 'Confirmed transaction hash does not match persisted transaction ID for withdrawal %', p_withdrawal_id;
+    END IF;
+
     IF LOWER(v_withdrawal.status) IN ('confirmed', 'completed') THEN
+        IF LOWER(v_withdrawal_pair.status) NOT IN ('confirmed', 'completed')
+           OR BTRIM(COALESCE(v_withdrawal.tx_hash, '')) <> BTRIM(p_tx_hash)
+           OR BTRIM(COALESCE(v_withdrawal_pair.tx_hash, '')) <> BTRIM(p_tx_hash) THEN
+            RAISE EXCEPTION 'Withdrawal % has inconsistent completion state; manual reconciliation required', p_withdrawal_id;
+        END IF;
         RETURN jsonb_build_object('success', true, 'message', 'Already confirmed');
+    END IF;
+    IF LOWER(v_withdrawal_pair.status) IN ('confirmed', 'completed') THEN
+        RAISE EXCEPTION 'Withdrawal % has inconsistent completion state; manual reconciliation required', p_withdrawal_id;
     END IF;
 
     -- Extract fee if recorded in metadata
@@ -297,12 +334,19 @@ BEGIN
         v_total_deducted := v_withdrawal.amount + COALESCE(v_fee, 0);
     END IF;
 
-    -- Release liability from in_withdrawal
+    -- Release only the exact reserved liability. A short/missing liability must
+    -- abort the transaction instead of silently clamping accounting to zero.
     UPDATE public.wallet_assets
-    SET in_withdrawal = GREATEST(0, in_withdrawal - v_total_deducted),
+    SET in_withdrawal = in_withdrawal - v_total_deducted,
         updated_at = NOW()
-    WHERE user_id = v_withdrawal.user_id AND asset_symbol = v_withdrawal.asset_symbol
+    WHERE user_id = v_withdrawal.user_id
+      AND asset_symbol = v_withdrawal.asset_symbol
+      AND in_withdrawal >= v_total_deducted
     RETURNING balance, in_withdrawal INTO v_balance_after, v_in_withdrawal_after;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Wallet asset liability row missing or insufficient for withdrawal %', p_withdrawal_id;
+    END IF;
 
     -- Mark onchain_withdrawals as COMPLETED
     UPDATE public.onchain_withdrawals
@@ -365,7 +409,8 @@ CREATE OR REPLACE FUNCTION public.process_failed_withdrawal(
     p_error_reason TEXT,
     p_actual_gas_amount NUMERIC DEFAULT 0,
     p_gas_asset TEXT DEFAULT NULL,
-    p_is_verified_revert BOOLEAN DEFAULT FALSE
+    p_is_verified_revert BOOLEAN DEFAULT FALSE,
+    p_is_verified_unbroadcast BOOLEAN DEFAULT FALSE
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -374,6 +419,7 @@ SET search_path = public, auth, pg_temp
 AS $$
 DECLARE
     v_withdrawal RECORD;
+    v_withdrawal_pair RECORD;
     v_fee NUMERIC(36, 18) := 0;
     v_total_refund NUMERIC(36, 18);
     v_balance_after NUMERIC(36, 18);
@@ -401,13 +447,57 @@ BEGIN
         RAISE EXCEPTION 'Withdrawal % not found', p_withdrawal_id;
     END IF;
 
-    -- Idempotency check: If already failed, do not refund again
-    IF LOWER(v_withdrawal.status) = 'failed' THEN
-        RETURN jsonb_build_object('success', true, 'message', 'Already marked as failed');
+    -- Lock the companion row too; both financial records must agree before refunding.
+    SELECT id, status, tx_hash, txid
+    INTO v_withdrawal_pair
+    FROM public.withdrawals
+    WHERE id = p_withdrawal_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Companion withdrawal record % not found; refusing refund', p_withdrawal_id;
     END IF;
 
-    IF LOWER(v_withdrawal.status) IN ('confirmed', 'completed') THEN
+    -- Idempotency is valid only when both records already show FAILED.
+    IF LOWER(v_withdrawal.status) = 'failed' OR LOWER(v_withdrawal_pair.status) = 'failed' THEN
+        IF LOWER(v_withdrawal.status) = 'failed' AND LOWER(v_withdrawal_pair.status) = 'failed' THEN
+            RETURN jsonb_build_object('success', true, 'message', 'Already marked as failed');
+        END IF;
+        RAISE EXCEPTION 'Withdrawal % has inconsistent failure states; manual reconciliation required', p_withdrawal_id;
+    END IF;
+
+    IF LOWER(v_withdrawal.status) IN ('confirmed', 'completed')
+       OR LOWER(v_withdrawal_pair.status) IN ('confirmed', 'completed') THEN
         RAISE EXCEPTION 'Cannot refund completed withdrawal %', p_withdrawal_id;
+    END IF;
+
+    IF NOT COALESCE(p_is_verified_revert, FALSE)
+       AND NOT COALESCE(p_is_verified_unbroadcast, FALSE) THEN
+        RAISE EXCEPTION 'Refund requires verified pre-broadcast failure or confirmed on-chain revert for withdrawal %', p_withdrawal_id;
+    END IF;
+
+    IF COALESCE(p_is_verified_unbroadcast, FALSE) THEN
+        IF LOWER(v_withdrawal.status) NOT IN ('pending', 'approved', 'queued', 'processing')
+           OR LOWER(v_withdrawal_pair.status) NOT IN ('pending', 'approved', 'queued', 'processing') THEN
+            RAISE EXCEPTION 'Withdrawal % is not in a refundable pre-broadcast state in both records', p_withdrawal_id;
+        END IF;
+        IF NULLIF(BTRIM(COALESCE(v_withdrawal.tx_hash, '')), '') IS NOT NULL
+           OR NULLIF(BTRIM(COALESCE(v_withdrawal_pair.tx_hash, '')), '') IS NOT NULL
+           OR NULLIF(BTRIM(COALESCE(v_withdrawal_pair.txid, '')), '') IS NOT NULL THEN
+            RAISE EXCEPTION 'Withdrawal % already has a transaction hash; automatic unbroadcast refund denied', p_withdrawal_id;
+        END IF;
+    END IF;
+
+    IF COALESCE(p_is_verified_revert, FALSE) THEN
+        IF LOWER(v_withdrawal.status) NOT IN ('processing', 'broadcasted', 'ambiguous_broadcast')
+           OR LOWER(v_withdrawal_pair.status) NOT IN ('processing', 'broadcasted', 'ambiguous_broadcast') THEN
+            RAISE EXCEPTION 'Withdrawal % is not in a refundable reverted-transaction state in both records', p_withdrawal_id;
+        END IF;
+        IF NULLIF(BTRIM(COALESCE(v_withdrawal.tx_hash, '')), '') IS NULL
+           OR (NULLIF(BTRIM(COALESCE(v_withdrawal_pair.tx_hash, '')), '') IS NOT NULL AND BTRIM(v_withdrawal_pair.tx_hash) <> BTRIM(v_withdrawal.tx_hash))
+           OR (NULLIF(BTRIM(COALESCE(v_withdrawal_pair.txid, '')), '') IS NOT NULL AND BTRIM(v_withdrawal_pair.txid) <> BTRIM(v_withdrawal.tx_hash)) THEN
+            RAISE EXCEPTION 'Withdrawal % has missing or conflicting transaction hashes; automatic revert refund denied', p_withdrawal_id;
+        END IF;
     END IF;
 
     -- Extract fee if recorded in metadata
@@ -423,10 +513,16 @@ BEGIN
     -- Credit balance and release in_withdrawal in wallet_assets
     UPDATE public.wallet_assets
     SET balance = balance + v_total_refund,
-        in_withdrawal = GREATEST(0, in_withdrawal - v_total_refund),
+        in_withdrawal = in_withdrawal - v_total_refund,
         updated_at = NOW()
-    WHERE user_id = v_withdrawal.user_id AND asset_symbol = v_withdrawal.asset_symbol
+    WHERE user_id = v_withdrawal.user_id
+      AND asset_symbol = v_withdrawal.asset_symbol
+      AND in_withdrawal >= v_total_refund
     RETURNING balance, in_withdrawal INTO v_balance_after, v_in_withdrawal_after;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Wallet asset liability row missing or insufficient for withdrawal %', p_withdrawal_id;
+    END IF;
 
     -- Mark onchain_withdrawals as FAILED
     UPDATE public.onchain_withdrawals
@@ -537,14 +633,15 @@ END;
 $$;
 
 -- 7. Grant Permissions
-REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT) TO authenticated, service_role, postgres;
+REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT) TO service_role, postgres;
 
-REVOKE EXECUTE ON FUNCTION public.complete_onchain_withdrawal(UUID, TEXT, NUMERIC, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.complete_onchain_withdrawal(UUID, TEXT, NUMERIC, TEXT) TO authenticated, service_role, postgres;
+-- Settlement and refund RPCs mutate financial liabilities; only trusted server-side roles may call them.
+REVOKE EXECUTE ON FUNCTION public.complete_onchain_withdrawal(UUID, TEXT, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_onchain_withdrawal(UUID, TEXT, NUMERIC, TEXT) TO service_role, postgres;
 
-REVOKE EXECUTE ON FUNCTION public.process_failed_withdrawal(UUID, TEXT, NUMERIC, TEXT, BOOLEAN) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.process_failed_withdrawal(UUID, TEXT, NUMERIC, TEXT, BOOLEAN) TO authenticated, service_role, postgres;
+REVOKE EXECUTE ON FUNCTION public.process_failed_withdrawal(UUID, TEXT, NUMERIC, TEXT, BOOLEAN, BOOLEAN) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_failed_withdrawal(UUID, TEXT, NUMERIC, TEXT, BOOLEAN, BOOLEAN) TO service_role, postgres;
 
 REVOKE EXECUTE ON FUNCTION public.claim_pending_withdrawals(INTEGER) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.claim_pending_withdrawals(INTEGER) TO service_role, postgres;

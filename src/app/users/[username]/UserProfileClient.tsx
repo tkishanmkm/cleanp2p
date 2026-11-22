@@ -22,17 +22,21 @@ import {
   Zap,
 } from 'lucide-react';
 import UserAvatar from '@/components/common/UserAvatar';
-import { getPresenceStatus, formatJoinedDate, usePresenceStatus } from '@/lib/presence';
+import { usePresenceStatus } from '@/lib/presence';
 import { createClient } from '@/utils/supabase/client';
 import { countries } from '@/lib/countries';
 import { getIdentityVerificationState } from '@/utils/userPrivacy';
+import { useI18n } from '@/context/i18n-context';
 
 interface UserProfileClientProps {
   profile: {
     id: string;
     username: string;
+    is_trading_eligible?: boolean;
+    display_name?: string | null;
     full_name?: string | null;
     avatar_url?: string | null;
+    photo_url?: string | null;
     country?: string | null;
     is_email_verified?: boolean;
     is_id_verified?: boolean;
@@ -40,7 +44,10 @@ interface UserProfileClientProps {
     created_at?: string | null;
     last_seen_at?: string | null;
     last_seen?: string | null;
+    last_active?: string | null;
+    is_online?: boolean | null;
     merchant_tier?: string | null;
+    verification_tier?: number | string | null;
     bio?: string | null;
   };
   buyAds: any[];
@@ -158,18 +165,18 @@ function getFiatFlagUrl(fiat: string): string {
   return `https://flagcdn.com/w40/${code.toLowerCase()}.png`;
 }
 
-function formatDurationSeconds(seconds: number | null | undefined): string {
-  if (seconds == null || isNaN(seconds) || seconds <= 0) return 'N/A';
-  if (seconds < 60) return `${Math.round(seconds)}s`;
+function formatDurationSeconds(seconds: number | null | undefined, language: string, t: (key: string) => string): string {
+  if (seconds == null || isNaN(seconds) || seconds <= 0) return t('publicProfile.durationUnavailable');
+  if (seconds < 60) return t('publicProfile.durationSeconds').replace('{count}', Math.round(seconds).toLocaleString(language));
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min${minutes > 1 ? 's' : ''}`;
-  const hours = (seconds / 3600).toFixed(1);
-  return `${hours} hr${Number(hours) > 1 ? 's' : ''}`;
+  if (minutes < 60) return t('publicProfile.durationMinutes').replace('{count}', minutes.toLocaleString(language));
+  const hours = Number((seconds / 3600).toFixed(1));
+  return t('publicProfile.durationHours').replace('{count}', hours.toLocaleString(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
 }
 
-function formatVolumeUSD(amount: number | null | undefined): string {
+function formatVolumeUSD(amount: number | null | undefined, language: string): string {
   const val = Number(amount) || 0;
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(language, {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
@@ -197,6 +204,14 @@ export default function UserProfileClient({
   givenFeedbacks,
   stats,
 }: UserProfileClientProps) {
+  const { t, language } = useI18n();
+  const formatProfileCurrency = (amount: number, currency: string) => {
+    try {
+      return new Intl.NumberFormat(language, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    } catch {
+      return currency + ' ' + Number(amount || 0).toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+  };
   const [profile, setProfile] = useState(initialProfile);
   const [activeTab, setActiveTab] = useState<'buy_ads' | 'sell_ads' | 'received' | 'given'>('buy_ads');
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'positive' | 'negative'>('all');
@@ -209,9 +224,9 @@ export default function UserProfileClient({
     // 1. Fetch latest profile immediately on mount to prevent stale SSR cache
     const fetchLatestProfile = async () => {
       try {
-        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, merchant_tier, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, total_volume_usd, positive_feedback, negative_feedback, feedback_score';
         const { data: latest } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select(PUBLIC_PROFILE_COLUMNS)
           .eq('id', initialProfile.id)
           .maybeSingle();
@@ -224,9 +239,12 @@ export default function UserProfileClient({
             is_id_verified: verification.isVerified,
             kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
             verification_tier: verification.tier,
-            last_seen: latest.last_seen || latest.last_seen_at || latest.last_active || prev.last_seen,
-            last_seen_at: latest.last_seen_at || latest.last_seen || prev.last_seen_at,
-            last_active: latest.last_active || latest.last_seen || prev.last_active,
+            // The production public_profiles view intentionally excludes
+            // precise last-seen timestamps. Preserve previously authorized
+            // presence metadata instead of querying a non-existent field.
+            last_seen: prev.last_seen,
+            last_seen_at: prev.last_seen_at,
+            last_active: prev.last_active,
             is_online: latest.is_online ?? prev.is_online,
           }));
         }
@@ -237,46 +255,51 @@ export default function UserProfileClient({
 
     fetchLatestProfile();
 
-    // 2. Poll every 15 seconds to ensure active heartbeats show in real-time
-    const pollInterval = setInterval(fetchLatestProfile, 15000);
-
-    // 3. Supabase Realtime channel subscription for instant update when heartbeat is written
-    const channel = supabase
-      .channel(`public:profiles:presence:${initialProfile.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${initialProfile.id}`,
-        },
-        (payload) => {
-          if (payload.new) {
-            const updated = payload.new as any;
-            setProfile((prev) => ({
-              ...prev,
-              ...updated,
-              last_seen: updated.last_seen || updated.last_seen_at || updated.last_active || prev.last_seen,
-              last_seen_at: updated.last_seen_at || updated.last_seen || prev.last_seen_at,
-              last_active: updated.last_active || updated.last_seen || prev.last_active,
-              is_online: updated.is_online ?? prev.is_online,
-            }));
-          }
-        }
-      )
-      .subscribe();
+    // Public profile pages do not need a dedicated Realtime subscription per visitor.
+    // Refresh once per minute only while visible to conserve the Free-tier Realtime quota.
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchLatestProfile();
+    }, 60000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void fetchLatestProfile();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       clearInterval(pollInterval);
-      supabase.removeChannel(channel);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [initialProfile?.id]);
 
   const presence = usePresenceStatus(profile, 15000);
+  const localizedPresenceLabel = presence.isOnline
+    ? t('p2pAdCard.online')
+    : presence.label === 'Offline'
+      ? t('p2pAdCard.offline')
+      : (() => {
+          const match = presence.label.match(/^Last seen (\d+)(m|h|d) ago$/);
+          if (!match) return presence.label;
+          const key = match[2] === 'm' ? 'lastSeenMinutes' : match[2] === 'h' ? 'lastSeenHours' : 'lastSeenDays';
+          return t('p2pAdCard.' + key).replace('{count}', match[1]);
+        })();
+  const localizedJoinedDate = (createdAt?: string | null) => {
+    if (!createdAt) return t('p2pAdCard.joinedRecently');
+    const created = new Date(createdAt);
+    if (Number.isNaN(created.getTime())) return t('p2pAdCard.joinedRecently');
+    const days = Math.floor((Date.now() - created.getTime()) / (1000 * 3600 * 24));
+    if (days < 1) return t('p2pAdCard.joinedToday');
+    if (days < 30) return t('p2pAdCard.joinedDays').replace('{count}', days.toLocaleString(language));
+    const months = Math.floor(days / 30);
+    if (months < 12) return t('p2pAdCard.joinedMonths').replace('{count}', months.toLocaleString(language));
+    return t('p2pAdCard.joinedYears').replace('{count}', Math.floor(days / 365).toLocaleString(language));
+  };
   const countryInfo = getCountryDetails(profile.country);
+  if (!profile.country) countryInfo.name = t('publicProfile.global');
 
-  const cleanUsername = (profile.username || 'User').replace(/^@/, '');
+  const cleanUsername = (profile.username || t('publicProfile.fallbackUser')).replace(/^@/, '');
+  const profileStatusKey = profile.is_trading_eligible !== true ? 'restricted' : null;
+  const visibleBuyAds = profileStatusKey ? [] : buyAds;
+  const visibleSellAds = profileStatusKey ? [] : sellAds;
 
   // Filter feedbacks based on selected filter
   const displayedFeedbacks = (activeTab === 'received' ? receivedFeedbacks : givenFeedbacks).filter((fb) => {
@@ -287,6 +310,11 @@ export default function UserProfileClient({
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 text-neutral-900 dark:text-neutral-100 min-h-screen">
+      {profileStatusKey && (
+        <div role="status" className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-foreground">
+          {t('accountStatus.' + profileStatusKey)}
+        </div>
+      )}
       {/* Top Trader Profile Card */}
       <div className="p-6 sm:p-8 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 shadow-sm mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -300,7 +328,7 @@ export default function UserProfileClient({
                 size="xl"
               />
               <span
-                title={presence.label}
+                title={localizedPresenceLabel}
                 className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-neutral-900 ${
                   presence.isOnline ? 'bg-emerald-500 ring-2 ring-emerald-500/20' : 'bg-neutral-400'
                 }`}
@@ -316,7 +344,7 @@ export default function UserProfileClient({
                 {profile.merchant_tier && profile.merchant_tier !== 'NONE' && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60">
                     <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    {profile.merchant_tier} Merchant
+                    {t('publicProfile.merchantBadge').replace('{tier}', profile.merchant_tier)}
                   </span>
                 )}
               </div>
@@ -325,35 +353,17 @@ export default function UserProfileClient({
               <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-neutral-500 dark:text-neutral-400">
                 <span className="flex items-center gap-1 font-medium">
                   <span className={`w-2 h-2 rounded-full ${presence.isOnline ? 'bg-emerald-500' : 'bg-neutral-400'}`} />
-                  {presence.label}
+                  {localizedPresenceLabel}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5 opacity-70" />
-                  {formatJoinedDate(profile.created_at)}
+                  {localizedJoinedDate(profile.created_at)}
                 </span>
               </div>
 
-              {/* Badges: Email Verified, ID Verified, Origin Country */}
+              {/* Public ID-verification badge; email and pending KYC state stay private. */}
               <div className="flex flex-wrap items-center gap-2 pt-2">
-                {/* Email Verification Badge */}
-                {profile.is_email_verified ? (
-                  <span
-                    id="badge-email-verified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    Email Verified
-                  </span>
-                ) : (
-                  <span
-                    id="badge-email-unverified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
-                  >
-                    Email Unverified
-                  </span>
-                )}
-
                 {/* ID / KYC Verification Badge */}
                 {(() => {
                   const v = getIdentityVerificationState(profile);
@@ -364,7 +374,7 @@ export default function UserProfileClient({
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80"
                       >
                         <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                        ID Verified
+                        {t('publicProfile.idVerified')}
                       </span>
                     );
                   }
@@ -375,7 +385,7 @@ export default function UserProfileClient({
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80"
                       >
                         <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                        ID Verification Pending
+                        {t('publicProfile.idPending')}
                       </span>
                     );
                   }
@@ -385,7 +395,7 @@ export default function UserProfileClient({
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
                     >
                       <ShieldAlert className="w-3.5 h-3.5 opacity-70" />
-                      ID Unverified
+                      {t('publicProfile.idUnverified')}
                     </span>
                   );
                 })()}
@@ -413,15 +423,15 @@ export default function UserProfileClient({
           <div className="flex sm:flex-col sm:items-end justify-between border-t sm:border-t-0 pt-4 sm:pt-0 border-neutral-200 dark:border-neutral-800 gap-2">
             <div className="text-left sm:text-right">
               <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider block">
-                Feedback Score
+                {t('publicProfile.feedbackScore')}
               </span>
               <div className="text-lg sm:text-xl font-bold text-emerald-600 dark:text-emerald-400 flex items-center sm:justify-end gap-1.5">
                 <ThumbsUp className="w-4 h-4" />
-                <span>{stats.positiveRatio}% Positive</span>
+                <span>{t('publicProfile.positivePercent').replace('{percent}', stats.positiveRatio)}</span>
               </div>
             </div>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              ({stats.positiveFeedbacksCount} positive / {stats.negativeFeedbacksCount} negative)
+              {t('publicProfile.positiveSummary').replace('{positive}', stats.positiveFeedbacksCount.toLocaleString(language)).replace('{negative}', stats.negativeFeedbacksCount.toLocaleString(language))}
             </p>
           </div>
         </div>
@@ -430,57 +440,57 @@ export default function UserProfileClient({
       {/* Comprehensive Trader Statistics Grid (Direct Database Metrics) */}
       <div className="mb-8">
         <h2 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">
-          Trader Key Statistics
+          {t('publicProfile.statsTitle')}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* Trade Volume */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Trade Volume</span>
+              <span className="text-xs font-medium">{t('publicProfile.tradeVolume')}</span>
               <DollarSign className="w-4 h-4 text-neutral-400" />
             </div>
             <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-neutral-100 truncate">
-              {formatVolumeUSD(stats.tradeVolumeUSD)}
+              {formatVolumeUSD(stats.tradeVolumeUSD, language)}
             </div>
           </div>
 
           {/* Completed Trades */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Completed Trades</span>
+              <span className="text-xs font-medium">{t('publicProfile.completedTrades')}</span>
               <CheckCircle className="w-4 h-4 text-emerald-500" />
             </div>
             <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-neutral-100">
-              {stats.completedTrades}
+              {stats.completedTrades.toLocaleString(language)}
             </div>
           </div>
 
           {/* Avg Paid */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Avg Paid Time</span>
+              <span className="text-xs font-medium">{t('publicProfile.avgPaidTime')}</span>
               <Zap className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-neutral-100">
-              {formatDurationSeconds(stats.avgPayTimeSeconds)}
+              {formatDurationSeconds(stats.avgPayTimeSeconds, language, t)}
             </div>
           </div>
 
           {/* Avg Release */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Avg Release Time</span>
+              <span className="text-xs font-medium">{t('publicProfile.avgReleaseTime')}</span>
               <Clock className="w-4 h-4 text-blue-500" />
             </div>
             <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-neutral-100">
-              {formatDurationSeconds(stats.avgReleaseTimeSeconds)}
+              {formatDurationSeconds(stats.avgReleaseTimeSeconds, language, t)}
             </div>
           </div>
 
           {/* Country Origin */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Country Origin</span>
+              <span className="text-xs font-medium">{t('publicProfile.countryOrigin')}</span>
               <Globe className="w-4 h-4 text-neutral-400" />
             </div>
             <div className="flex items-center gap-1.5 text-sm sm:text-base font-bold text-neutral-900 dark:text-neutral-100 truncate">
@@ -496,7 +506,7 @@ export default function UserProfileClient({
           {/* Positive Rating */}
           <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 mb-1.5">
-              <span className="text-xs font-medium">Positive Rating</span>
+              <span className="text-xs font-medium">{t('publicProfile.positiveRating')}</span>
               <TrendingUp className="w-4 h-4 text-emerald-500" />
             </div>
             <div className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400">
@@ -518,9 +528,9 @@ export default function UserProfileClient({
                 : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
             }`}
           >
-            <span>Buy Ads</span>
+            <span>{t('publicProfile.buyAdsTab')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-              {buyAds.length}
+              {visibleBuyAds.length}
             </span>
           </button>
 
@@ -533,9 +543,9 @@ export default function UserProfileClient({
                 : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
             }`}
           >
-            <span>Sell Ads</span>
+            <span>{t('publicProfile.sellAdsTab')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-              {sellAds.length}
+              {visibleSellAds.length}
             </span>
           </button>
 
@@ -548,7 +558,7 @@ export default function UserProfileClient({
                 : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
             }`}
           >
-            <span>Feedback Received</span>
+            <span>{t('publicProfile.feedbackReceivedTab')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
               {receivedFeedbacks.length}
             </span>
@@ -563,7 +573,7 @@ export default function UserProfileClient({
                 : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
             }`}
           >
-            <span>Feedback Given</span>
+            <span>{t('publicProfile.feedbackGivenTab')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
               {givenFeedbacks.length}
             </span>
@@ -576,16 +586,16 @@ export default function UserProfileClient({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
-              Buy Offers from @{cleanUsername}
+              {t('publicProfile.buyOffersHeading').replace('{username}', cleanUsername)}
             </h3>
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              {buyAds.length} active offer{buyAds.length !== 1 ? 's' : ''} (Buy crypto from @{cleanUsername})
+              {t('publicProfile.activeOffers').replace('{count}', visibleBuyAds.length.toLocaleString(language))} ({t('publicProfile.buyOffersSubheading').replace('{username}', cleanUsername)})
             </span>
           </div>
 
-          {buyAds.length > 0 ? (
+          {visibleBuyAds.length > 0 ? (
             <div className="grid grid-cols-1 gap-3.5">
-              {buyAds.map((ad) => {
+              {visibleBuyAds.map((ad) => {
                 const asset = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
                 const fiat = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
                 const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 10);
@@ -613,12 +623,12 @@ export default function UserProfileClient({
                     <div className="space-y-2.5">
                       <div className="flex flex-wrap items-center gap-2.5">
                         <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/60">
-                          BUY {asset}
+                          {t('publicProfile.buyTag').replace('{asset}', asset)}
                         </span>
                         <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                          Order Limit:{' '}
+                          {t('publicProfile.orderLimit')}{' '}
                           <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                            {minLimit.toLocaleString()} - {effectiveMaxLimit.toLocaleString()} {fiat}
+                            {minLimit.toLocaleString(language)} - {effectiveMaxLimit.toLocaleString(language)} {fiat}
                           </span>
                         </span>
                       </div>
@@ -641,7 +651,7 @@ export default function UserProfileClient({
                     <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-neutral-100 dark:border-neutral-800">
                       <div className="text-left md:text-right">
                         <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-                          Unit Price
+                          {t('publicProfile.unitPrice')}
                         </span>
                         <div className="flex items-center md:justify-end gap-1.5 font-mono text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
                           <img
@@ -650,8 +660,7 @@ export default function UserProfileClient({
                             className="w-4 h-3 object-cover rounded-xs border border-neutral-300 dark:border-neutral-700 shadow-xs"
                           />
                           <span>
-                            {price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}{' '}
-                            {fiat}
+                            {formatProfileCurrency(price, fiat)}
                           </span>
                         </div>
                       </div>
@@ -660,7 +669,7 @@ export default function UserProfileClient({
                         href={`/ad/${ad.id}`}
                         className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold rounded-xl text-xs sm:text-sm transition-colors shadow-xs flex items-center gap-1.5"
                       >
-                        <span>Buy {asset}</span>
+                        <span>{t('publicProfile.buyAction').replace('{asset}', asset)}</span>
                         <ArrowUpRight className="w-4 h-4" />
                       </Link>
                     </div>
@@ -672,10 +681,10 @@ export default function UserProfileClient({
             <div className="p-10 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-800 text-center space-y-2 bg-neutral-50/50 dark:bg-neutral-900/40">
               <Coins className="w-8 h-8 text-neutral-400 mx-auto opacity-70" />
               <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-                No active Buy advertisements
+                {t('publicProfile.noBuyAds')}
               </p>
               <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-                @{cleanUsername} currently has no active offers to buy cryptocurrency from.
+                {t('publicProfile.noBuyAdsDescription').replace('{username}', cleanUsername)}
               </p>
             </div>
           )}
@@ -687,16 +696,16 @@ export default function UserProfileClient({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
-              Sell Offers to @{cleanUsername}
+              {t('publicProfile.sellOffersHeading').replace('{username}', cleanUsername)}
             </h3>
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              {sellAds.length} active offer{sellAds.length !== 1 ? 's' : ''} (Sell crypto to @{cleanUsername})
+              {t('publicProfile.activeOffers').replace('{count}', visibleSellAds.length.toLocaleString(language))} ({t('publicProfile.sellOffersSubheading').replace('{username}', cleanUsername)})
             </span>
           </div>
 
-          {sellAds.length > 0 ? (
+          {visibleSellAds.length > 0 ? (
             <div className="grid grid-cols-1 gap-3.5">
-              {sellAds.map((ad) => {
+              {visibleSellAds.map((ad) => {
                 const asset = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
                 const fiat = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
                 const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 10);
@@ -714,12 +723,12 @@ export default function UserProfileClient({
                     <div className="space-y-2.5">
                       <div className="flex flex-wrap items-center gap-2.5">
                         <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800/60">
-                          SELL {asset}
+                          {t('publicProfile.sellTag').replace('{asset}', asset)}
                         </span>
                         <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                          Order Limit:{' '}
+                          {t('publicProfile.orderLimit')}{' '}
                           <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                            {minLimit.toLocaleString()} - {maxLimit.toLocaleString()} {fiat}
+                            {minLimit.toLocaleString(language)} - {maxLimit.toLocaleString(language)} {fiat}
                           </span>
                         </span>
                       </div>
@@ -742,7 +751,7 @@ export default function UserProfileClient({
                     <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-neutral-100 dark:border-neutral-800">
                       <div className="text-left md:text-right">
                         <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-                          Unit Price
+                          {t('publicProfile.unitPrice')}
                         </span>
                         <div className="flex items-center md:justify-end gap-1.5 font-mono text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
                           <img
@@ -751,8 +760,7 @@ export default function UserProfileClient({
                             className="w-4 h-3 object-cover rounded-xs border border-neutral-300 dark:border-neutral-700 shadow-xs"
                           />
                           <span>
-                            {price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}{' '}
-                            {fiat}
+                            {formatProfileCurrency(price, fiat)}
                           </span>
                         </div>
                       </div>
@@ -761,7 +769,7 @@ export default function UserProfileClient({
                         href={`/ad/${ad.id}`}
                         className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-semibold rounded-xl text-xs sm:text-sm transition-colors shadow-xs flex items-center gap-1.5"
                       >
-                        <span>Sell {asset}</span>
+                        <span>{t('publicProfile.sellAction').replace('{asset}', asset)}</span>
                         <ArrowUpRight className="w-4 h-4" />
                       </Link>
                     </div>
@@ -773,10 +781,10 @@ export default function UserProfileClient({
             <div className="p-10 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-800 text-center space-y-2 bg-neutral-50/50 dark:bg-neutral-900/40">
               <Coins className="w-8 h-8 text-neutral-400 mx-auto opacity-70" />
               <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-                No active Sell advertisements
+                {t('publicProfile.noSellAds')}
               </p>
               <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-                @{cleanUsername} currently has no active offers to sell cryptocurrency to.
+                {t('publicProfile.noSellAdsDescription').replace('{username}', cleanUsername)}
               </p>
             </div>
           )}
@@ -789,8 +797,8 @@ export default function UserProfileClient({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
               {activeTab === 'received'
-                ? `Feedback Received (${receivedFeedbacks.length})`
-                : `Feedback Given by @${cleanUsername} (${givenFeedbacks.length})`}
+                ? t('publicProfile.feedbackReceivedHeading').replace('{count}', receivedFeedbacks.length.toLocaleString(language))
+                : t('publicProfile.feedbackGivenHeading').replace('{username}', cleanUsername).replace('{count}', givenFeedbacks.length.toLocaleString(language))}
             </h3>
 
             {/* Filter Pills */}
@@ -803,7 +811,7 @@ export default function UserProfileClient({
                     : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
                 }`}
               >
-                All
+                {t('publicProfile.filterAll')}
               </button>
               <button
                 onClick={() => setFeedbackFilter('positive')}
@@ -814,7 +822,7 @@ export default function UserProfileClient({
                 }`}
               >
                 <ThumbsUp className="w-3 h-3" />
-                Positive
+                {t('publicProfile.filterPositive')}
               </button>
               <button
                 onClick={() => setFeedbackFilter('negative')}
@@ -825,7 +833,7 @@ export default function UserProfileClient({
                 }`}
               >
                 <ThumbsDown className="w-3 h-3" />
-                Negative
+                {t('publicProfile.filterNegative')}
               </button>
             </div>
           </div>
@@ -835,7 +843,7 @@ export default function UserProfileClient({
               {displayedFeedbacks.map((fb) => {
                 const isReceived = activeTab === 'received';
                 const counterParty = isReceived ? fb.from_profile : fb.to_profile;
-                const counterPartyName = (counterParty?.username || 'Trader').replace(/^@/, '');
+                const counterPartyName = (counterParty?.username || t('counterpartyPanel.fallbackTrader')).replace(/^@/, '');
 
                 return (
                   <div
@@ -855,7 +863,7 @@ export default function UserProfileClient({
                           size="sm"
                         />
                         <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                          {isReceived ? `@${counterPartyName}` : `To @${counterPartyName}`}
+                          {isReceived ? `@${counterPartyName}` : t('publicProfile.feedbackTo').replace('{username}', counterPartyName)}
                         </span>
                       </Link>
 
@@ -869,26 +877,26 @@ export default function UserProfileClient({
                         {fb.is_positive ? (
                           <>
                             <ThumbsUp className="w-3 h-3" />
-                            Positive
+                            {t('publicProfile.positive')}
                           </>
                         ) : (
                           <>
                             <ThumbsDown className="w-3 h-3" />
-                            Negative
+                            {t('publicProfile.negative')}
                           </>
                         )}
                       </span>
                     </div>
 
                     <p className="text-xs sm:text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed pl-1">
-                      {fb.comment || 'No written comment provided.'}
+                      {fb.comment || t('publicProfile.noWrittenComment')}
                     </p>
 
                     <div className="flex items-center justify-between text-[11px] text-neutral-400 pl-1 pt-1 border-t border-neutral-100 dark:border-neutral-800/80">
-                      <span>{new Date(fb.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                      <span>{new Date(fb.created_at).toLocaleDateString(language, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
                       <span className="flex items-center gap-1 text-[10px] text-neutral-400">
                         <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                        Verified Trade Feedback
+                        {t('publicProfile.verifiedTradeFeedback')}
                       </span>
                     </div>
                   </div>
@@ -899,14 +907,14 @@ export default function UserProfileClient({
             <div className="p-10 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-800 text-center space-y-2 bg-neutral-50/50 dark:bg-neutral-900/40">
               <MessageSquare className="w-8 h-8 text-neutral-400 mx-auto opacity-70" />
               <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-                No feedback records found
+                {t('publicProfile.noFeedbackRecords')}
               </p>
               <p className="text-xs text-neutral-500 max-w-sm mx-auto">
                 {feedbackFilter !== 'all'
-                  ? `There are no ${feedbackFilter} feedbacks to display.`
+                  ? t('publicProfile.noFilteredFeedback').replace('{filter}', feedbackFilter === 'positive' ? t('publicProfile.filterPositive').toLowerCase() : t('publicProfile.filterNegative').toLowerCase())
                   : activeTab === 'received'
-                  ? 'This user has not received any trade feedback yet.'
-                  : 'This user has not left any feedback for other traders yet.'}
+                  ? t('publicProfile.noReceivedFeedback')
+                  : t('publicProfile.noGivenFeedback')}
               </p>
             </div>
           )}

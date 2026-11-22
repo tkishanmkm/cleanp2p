@@ -3,8 +3,8 @@ import { ArrowLeft, Gavel, Scale, AlertCircle, FileCheck, CheckCircle2, ShieldCh
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Dispute Resolution Guide | Paxones Guides',
-  description: 'How disputes work, evidence submission guidelines, moderator arbitrations, and timelines on Paxones P2P.',
+  title: 'Dispute Resolution Guide | Guides',
+  description: 'How disputes work, evidence submission guidelines, moderator arbitrations, and timelines on Wayones P2P.',
 };
 
 export default function DisputeResolutionGuidePage() {

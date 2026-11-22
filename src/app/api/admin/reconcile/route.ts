@@ -63,8 +63,9 @@ export async function POST(req: NextRequest) {
           anomaliesCount: report.anomalousWallets,
           isBalanced: report.isBalanced,
           totalLiability: report.totalLiability,
+          ip_address_hint: ip,
+          ip_address_trust: 'forwarded_header_unverified',
         },
-        ip_address: ip,
       });
     } catch (_) {}
 

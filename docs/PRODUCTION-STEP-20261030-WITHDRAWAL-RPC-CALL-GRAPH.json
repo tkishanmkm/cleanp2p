@@ -1,0 +1,172 @@
+{
+  "generatedAt": "2026-10-30T10:10:47.042Z",
+  "source": "C:\\Users\\theki\\cleanp2p",
+  "limitation": "Static source call-site inventory. It does not establish deployed PostgreSQL signatures, overload resolution, role grants, or runtime reachability.",
+  "callCount": 16,
+  "calls": [
+    {
+      "file": "src/app/api/admin/withdrawals/approve/route.ts",
+      "line": 35,
+      "rpc": "approve_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_admin_id"
+      ]
+    },
+    {
+      "file": "src/app/api/admin/withdrawals/review/route.ts",
+      "line": 34,
+      "rpc": "approve_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_admin_id"
+      ]
+    },
+    {
+      "file": "src/app/api/admin/withdrawals/review/route.ts",
+      "line": 58,
+      "rpc": "admin_reject_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_admin_id",
+        "p_rejection_reason"
+      ]
+    },
+    {
+      "file": "src/app/api/withdraw/refund/route.ts",
+      "line": 30,
+      "rpc": "process_failed_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_error_reason"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 111,
+      "rpc": "claim_pending_withdrawals",
+      "argumentKeys": [
+        "p_owner_token",
+        "p_limit"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 175,
+      "rpc": "record_withdrawal_broadcast",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_tx_hash",
+        "p_owner_token"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 234,
+      "rpc": "record_withdrawal_broadcast",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_tx_hash",
+        "p_owner_token"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 258,
+      "rpc": "process_failed_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_error_reason"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 283,
+      "rpc": "record_ambiguous_withdrawal_broadcast",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_tx_hash",
+        "p_error",
+        "error",
+        "p_owner_token"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 412,
+      "rpc": "process_failed_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_error_reason",
+        "p_is_verified_revert"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorker.ts",
+      "line": 457,
+      "rpc": "process_failed_withdrawal",
+      "argumentKeys": [
+        "p_withdrawal_id",
+        "p_error_reason",
+        "p_is_verified_revert"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorkerLease.ts",
+      "line": 22,
+      "rpc": "acquire_withdrawal_worker_lease",
+      "argumentKeys": [
+        "p_owner_token",
+        "p_lease_seconds"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorkerLease.ts",
+      "line": 39,
+      "rpc": "renew_withdrawal_worker_lease",
+      "argumentKeys": [
+        "p_owner_token",
+        "p_lease_seconds"
+      ]
+    },
+    {
+      "file": "src/jobs/withdrawalWorkerLease.ts",
+      "line": 65,
+      "rpc": "release_withdrawal_worker_lease",
+      "argumentKeys": [
+        "p_owner_token"
+      ]
+    },
+    {
+      "file": "src/lib/services/withdrawalService.ts",
+      "line": 365,
+      "rpc": "lookup_withdrawal_idempotency_replay",
+      "argumentKeys": [
+        "p_user_id",
+        "p_idempotency_key",
+        "p_network",
+        "p_to_address",
+        "p_amount",
+        "p_asset"
+      ]
+    },
+    {
+      "file": "src/lib/services/withdrawalService.ts",
+      "line": 576,
+      "rpc": "request_withdrawal_idempotent",
+      "argumentKeys": [
+        "p_user_id",
+        "p_network",
+        "p_to_address",
+        "p_amount",
+        "p_fee",
+        "p_asset",
+        "p_usd_equivalent",
+        "p_idempotency_key"
+      ]
+    }
+  ],
+  "missingCallSites": [
+    "request_withdrawal"
+  ]
+}

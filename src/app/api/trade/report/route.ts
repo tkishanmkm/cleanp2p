@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export async function POST(req: Request) {
@@ -54,8 +54,8 @@ export async function POST(req: Request) {
       if (prof?.username) reporterUsername = prof.username;
     } catch {}
 
-    // Post official Paxones system message to trade chat
-    await insertPaxonesSystemMessage(supabase, {
+    // Post official Wayones system message to trade chat
+    await insertPaxonesSystemMessage(getSupabaseAdminClient(), {
       tradeId,
       type: 'ISSUE_REPORTED',
       openerUsername: reporterUsername,

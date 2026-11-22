@@ -1,11 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchAndCacheNetworkGasFees, getCachedGasFees } from '@/lib/gas-oracle';
+import { getCachedGasFees } from '@/lib/gas-oracle';
+import { fetchAndCacheNetworkGasFees } from '@/lib/gas-oracle-server';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const crypto = searchParams.get('crypto')?.toUpperCase() || 'BTC';
-    const network = searchParams.get('network')?.toUpperCase() || crypto;
+    const crypto = searchParams.get('crypto')?.trim().toUpperCase() || 'BTC';
+    const network = searchParams.get('network')?.trim().toUpperCase() || crypto;
+
+    // Only serve explicitly supported asset/network pairs. Without this guard,
+    // arbitrary symbols fall through to generic EVM estimates and a $1 price
+    // fallback, which can produce misleading fee quotes.
+    const supportedPairs = new Set([
+      'BTC:BTC',
+      'ETH:ETH',
+      'USDT:ERC20',
+      'USDT:BEP20',
+      'USDT:TRC20',
+      'USDC:ERC20',
+      'TRX:TRX',
+      'LTC:LTC',
+      'BNB:BSC',
+    ]);
+
+    if (crypto.length > 12 || network.length > 12 || !supportedPairs.has(`${crypto}:${network}`)) {
+      return NextResponse.json({ error: 'Unsupported asset/network pair.' }, { status: 400 });
+    }
 
     const gasFees = await getCachedGasFees(crypto, network);
 
@@ -46,7 +66,9 @@ export async function POST(req: NextRequest) {
     let isAuthorized = false;
     if (configuredSecret && providedSecret === configuredSecret) {
       isAuthorized = true;
-    } else if (process.env.NODE_ENV === 'development' || !configuredSecret) {
+    } else if (process.env.NODE_ENV === 'development' && !configuredSecret) {
+      // Never permit unauthenticated cache refreshes in production when the
+      // worker secret is missing or misconfigured.
       isAuthorized = true;
     }
 

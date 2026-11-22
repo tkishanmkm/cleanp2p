@@ -40,16 +40,23 @@ export async function createP2PAd(
 }
 
 export async function updateAd(_db: any, adId: string, adData: Partial<Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>>) {
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .update(adData)
-    .eq('id', adId)
-    .select();
-
-  if (error) {
-    throw new Error(error.message);
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
   }
-  return data;
+
+  const response = await fetch(`/api/p2p/ads/${encodeURIComponent(adId)}`, {
+    method: 'PATCH',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(adData),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.error || result?.message || `Advertisement update failed (HTTP ${response.status}).`);
+  }
+  return result.data;
 }
 
 export async function updateAdStatus(_db: any, adId: string, active: boolean) {
@@ -60,7 +67,7 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
   }
 
   // Call canonical status update endpoint
-  const res = await fetch(`/api/ads/${adId}`, {
+  const res = await fetch(`/api/ads/${encodeURIComponent(adId)}/toggle`, {
     method: 'PATCH',
     headers,
     credentials: 'include',
@@ -113,7 +120,10 @@ export async function getMarketplaceAds(
     .from('p2p_ads')
     .select('*')
     .eq('type', queryType)
-    .ilike('status', 'active');
+    .ilike('status', 'active')
+    .eq('active', true)
+    .eq('is_active', true)
+    .eq('is_deleted', false);
 
   if (coin && coin !== 'ALL') {
     query = query.eq('coin', coin.toUpperCase());

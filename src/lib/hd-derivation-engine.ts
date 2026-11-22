@@ -1,11 +1,20 @@
+import 'server-only';
+
 import crypto from 'crypto';
 import { HDKey } from '@scure/bip32';
 import * as bip39 from '@scure/bip39';
+import { requireDepositMnemonic, validateWalletDerivationIndex } from '@/lib/crypto/mnemonic-validation';
+import {
+  deriveAllDepositAddressesFromXpubs,
+  type DepositAccountXpubs,
+} from '@/lib/crypto/hd-derivation';
+export { isValidDepositMnemonic, validateWalletDerivationIndex } from '@/lib/crypto/mnemonic-validation';
 import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
 import { networks } from 'bitcoinjs-lib';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseServiceClient } from '@/lib/supabase/service-role';
 
 // ============================================================================
 // Network Definitions (Mainnet)
@@ -176,22 +185,7 @@ export const BIP_PATHS = {
 // ============================================================================
 
 export function getAdminClient(): SupabaseClient {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  return getSupabaseServiceClient();
 }
 
 // ============================================================================
@@ -201,35 +195,61 @@ export function getAdminClient(): SupabaseClient {
 let cachedMasterHDKey: HDKey | null = null;
 
 /**
- * Derives master HDKey root from DEPOSIT_HD_MNEMONIC using @scure/bip39 and @scure/bip32.
+ * Public xpub mode is opt-in and remains disabled by default. Enable only after
+ * all four account xpubs are verified against existing customer address records
+ * at multiple known wallet indices. The xpub mode never reads the master mnemonic.
+ */
+function isPublicXpubDerivationEnabled(): boolean {
+  return process.env.PUBLIC_XPUB_DERIVATION_ENABLED === 'true';
+}
+
+function getConfiguredDepositAccountXpubs(): DepositAccountXpubs {
+  return {
+    evm: process.env.EVM_XPUB?.trim() || '',
+    btc: process.env.BTC_XPUB?.trim() || '',
+    tron: process.env.TRON_XPUB?.trim() || '',
+    ltc: process.env.LTC_XPUB?.trim() || '',
+  };
+}
+
+/**
+ * Derives master HDKey root from a checksum-validated DEPOSIT_HD_MNEMONIC.
+ * The mnemonic path is unavailable when public-only derivation mode is enabled.
  */
 export async function getMasterHDKey(): Promise<HDKey> {
+  if (isPublicXpubDerivationEnabled()) {
+    throw new Error('Master mnemonic derivation is disabled while PUBLIC_XPUB_DERIVATION_ENABLED is true');
+  }
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
-  if (!mnemonic || !mnemonic.trim()) {
-    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  const mnemonic = requireDepositMnemonic();
+  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic);
+  try {
+    cachedMasterHDKey = HDKey.fromMasterSeed(seed);
+    return cachedMasterHDKey;
+  } finally {
+    // HDKey derives and retains its own key material; clear the temporary BIP-39 seed buffer.
+    seed.fill(0);
   }
-
-  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic.trim());
-  cachedMasterHDKey = HDKey.fromMasterSeed(seed);
-  return cachedMasterHDKey;
 }
 
 /**
  * Synchronous variant for master HDKey derivation with memory caching.
  */
 export function getMasterHDKeySync(): HDKey {
+  if (isPublicXpubDerivationEnabled()) {
+    throw new Error('Master mnemonic derivation is disabled while PUBLIC_XPUB_DERIVATION_ENABLED is true');
+  }
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
-  if (!mnemonic || !mnemonic.trim()) {
-    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  const mnemonic = requireDepositMnemonic();
+  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic);
+  try {
+    cachedMasterHDKey = HDKey.fromMasterSeed(seed);
+    return cachedMasterHDKey;
+  } finally {
+    seed.fill(0);
   }
-
-  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic.trim());
-  cachedMasterHDKey = HDKey.fromMasterSeed(seed);
-  return cachedMasterHDKey;
 }
 
 /**
@@ -239,32 +259,18 @@ export function deriveBitcoinNativeSegwitAddress(
   masterKey: HDKey,
   index: number
 ): string {
-  const basePath = BIP_PATHS.BTC;
-  const bech32Prefix = BTC_NETWORK.bech32;
-
+  validateWalletDerivationIndex(index);
+  const child = masterKey.derive(`${BIP_PATHS.BTC}/${index}`);
   try {
-    const child = masterKey.derive(`${basePath}/${index}`);
-    if (!child.publicKey) throw new Error(`No public key generated for BTC child at ${basePath}/${index}`);
+    if (!child.publicKey) throw new Error('No public key generated for BTC child');
 
     const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-
     const words = bech32.toWords(hash160);
     words.unshift(0x00);
-
-    return bech32.encode(bech32Prefix, words);
-  } catch (err) {
-    const btcXpub = process.env.BTC_XPUB;
-    if (btcXpub) {
-      const hdkey = HDKey.fromExtendedKey(btcXpub);
-      const child = hdkey.deriveChild(0).deriveChild(index);
-      const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
-      const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-      const words = bech32.toWords(hash160);
-      words.unshift(0x00);
-      return bech32.encode(BTC_NETWORK.bech32, words);
-    }
-    throw err;
+    return bech32.encode(BTC_NETWORK.bech32, words);
+  } finally {
+    child.wipePrivateData();
   }
 }
 
@@ -273,25 +279,17 @@ export function deriveBitcoinNativeSegwitAddress(
  * Reused for ETH, USDT ERC-20, and USDT BEP-20.
  */
 export function deriveEvmAddress(masterKey: HDKey, index: number): string {
+  validateWalletDerivationIndex(index);
+  const child = masterKey.derive(`${BIP_PATHS.ETH}/${index}`);
   try {
-    const child = masterKey.derive(`${BIP_PATHS.ETH}/${index}`);
     if (!child.publicKey) throw new Error('No public key generated for EVM child');
 
     const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey, false);
     const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
     const addressHash = ethers.keccak256(pubBytes);
     return ethers.getAddress(`0x${addressHash.slice(-40)}`);
-  } catch (err) {
-    const evmXpub = process.env.EVM_XPUB;
-    if (evmXpub) {
-      const hdkey = HDKey.fromExtendedKey(evmXpub);
-      const child = hdkey.deriveChild(0).deriveChild(index);
-      const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey!, false);
-      const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
-      const addressHash = ethers.keccak256(pubBytes);
-      return ethers.getAddress(`0x${addressHash.slice(-40)}`);
-    }
-    throw err;
+  } finally {
+    child.wipePrivateData();
   }
 }
 
@@ -299,29 +297,18 @@ export function deriveEvmAddress(masterKey: HDKey, index: number): string {
  * Derives Litecoin Native SegWit address (BIP84: m/84'/2'/0'/0/i -> ltc1q...).
  */
 export function deriveLitecoinNativeSegwitAddress(masterKey: HDKey, index: number): string {
+  validateWalletDerivationIndex(index);
+  const child = masterKey.derive(`${BIP_PATHS.LTC}/${index}`);
   try {
-    const child = masterKey.derive(`${BIP_PATHS.LTC}/${index}`);
     if (!child.publicKey) throw new Error('No public key generated for LTC child');
 
     const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-
     const words = bech32.toWords(hash160);
     words.unshift(0x00);
-
     return bech32.encode(LTC_NETWORK.bech32, words);
-  } catch (err) {
-    const ltcXpub = process.env.LTC_XPUB;
-    if (ltcXpub) {
-      const hdkey = HDKey.fromExtendedKey(ltcXpub);
-      const child = hdkey.deriveChild(0).deriveChild(index);
-      const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
-      const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-      const words = bech32.toWords(hash160);
-      words.unshift(0x00);
-      return bech32.encode(LTC_NETWORK.bech32, words);
-    }
-    throw err;
+  } finally {
+    child.wipePrivateData();
   }
 }
 
@@ -330,15 +317,14 @@ export function deriveLitecoinNativeSegwitAddress(masterKey: HDKey, index: numbe
  * Used for TRX and USDT TRC-20.
  */
 export function deriveTronAddress(masterKey: HDKey, index: number): string {
+  validateWalletDerivationIndex(index);
+  const child = masterKey.derive(`${BIP_PATHS.TRON}/${index}`);
   try {
-    const child = masterKey.derive(`${BIP_PATHS.TRON}/${index}`);
     if (!child.publicKey) throw new Error('No public key generated for TRON child');
 
     const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey, false);
     const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
     const addressHash = ethers.keccak256(pubBytes);
-
-    // Prefix 0x41 for TRON Base58Check
     const tronRawAddress = Buffer.concat([
       Buffer.from([0x41]),
       Buffer.from(addressHash.slice(-40), 'hex'),
@@ -346,23 +332,9 @@ export function deriveTronAddress(masterKey: HDKey, index: number): string {
 
     const hash1 = crypto.createHash('sha256').update(tronRawAddress).digest();
     const hash2 = crypto.createHash('sha256').update(hash1).digest();
-    const checksum = hash2.subarray(0, 4);
-
-    return bs58.encode(Buffer.concat([tronRawAddress, checksum]));
-  } catch (err) {
-    const tronXpub = process.env.TRON_XPUB;
-    if (tronXpub) {
-      const hdkey = HDKey.fromExtendedKey(tronXpub);
-      const child = hdkey.deriveChild(0).deriveChild(index);
-      const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey!, false);
-      const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
-      const addressHash = ethers.keccak256(pubBytes);
-      const tronRaw = Buffer.concat([Buffer.from([0x41]), Buffer.from(addressHash.slice(-40), 'hex')]);
-      const hash1 = crypto.createHash('sha256').update(tronRaw).digest();
-      const hash2 = crypto.createHash('sha256').update(hash1).digest();
-      return bs58.encode(Buffer.concat([tronRaw, hash2.subarray(0, 4)]));
-    }
-    throw err;
+    return bs58.encode(Buffer.concat([tronRawAddress, hash2.subarray(0, 4)]));
+  } finally {
+    child.wipePrivateData();
   }
 }
 
@@ -370,12 +342,20 @@ export function deriveTronAddress(masterKey: HDKey, index: number): string {
  * Derives all 6 crypto deposit addresses for a specific integer index.
  */
 export async function deriveAllAddressesAsync(walletIndex: number): Promise<CryptoDepositAddresses> {
-  const masterKey = await getMasterHDKey();
+  validateWalletDerivationIndex(walletIndex);
 
+  if (isPublicXpubDerivationEnabled()) {
+    return deriveAllDepositAddressesFromXpubs(
+      getConfiguredDepositAccountXpubs(),
+      walletIndex,
+    );
+  }
+
+  const masterKey = await getMasterHDKey();
   const btc = deriveBitcoinNativeSegwitAddress(masterKey, walletIndex);
-  const evm = deriveEvmAddress(masterKey, walletIndex); // Shared by ETH, USDT ERC-20, USDT BEP-20
+  const evm = deriveEvmAddress(masterKey, walletIndex);
   const ltc = deriveLitecoinNativeSegwitAddress(masterKey, walletIndex);
-  const tron = deriveTronAddress(masterKey, walletIndex); // USDT TRC-20
+  const tron = deriveTronAddress(masterKey, walletIndex);
 
   return {
     BTC: btc,
@@ -391,8 +371,16 @@ export async function deriveAllAddressesAsync(walletIndex: number): Promise<Cryp
  * Synchronous address derivation helper.
  */
 export function deriveAllAddresses(walletIndex: number): CryptoDepositAddresses {
-  const masterKey = getMasterHDKeySync();
+  validateWalletDerivationIndex(walletIndex);
 
+  if (isPublicXpubDerivationEnabled()) {
+    return deriveAllDepositAddressesFromXpubs(
+      getConfiguredDepositAccountXpubs(),
+      walletIndex,
+    );
+  }
+
+  const masterKey = getMasterHDKeySync();
   const btc = deriveBitcoinNativeSegwitAddress(masterKey, walletIndex);
   const evm = deriveEvmAddress(masterKey, walletIndex);
   const ltc = deriveLitecoinNativeSegwitAddress(masterKey, walletIndex);
@@ -413,14 +401,12 @@ export function deriveAllAddresses(walletIndex: number): CryptoDepositAddresses 
 // ============================================================================
 
 /**
- * Deterministically checks or provisions all 6 crypto deposit addresses for a user:
- * 1. Checks if 6 address rows exist in public.user_deposit_addresses for user_id.
- * 2. If missing:
- *    a. Fetches user's wallet_index from public.profiles (or provisions sequentially).
- *    b. Derives addresses for BTC (BIP-84), ETH/EVM (BIP-44), LTC (BIP-84), TRON (BIP-44).
- *    c. UPSERT all 6 asset rows into public.user_deposit_addresses.
- *    d. UPDATE public.profiles with evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address.
- * 3. Returns the populated profile and address mapping object.
+ * Derives six asset/network views from four physical HD addresses and invokes the
+ * idempotent database provisioning RPC. The current database contract persists
+ * four chain-specific wallet rows, three canonical address rows (BTC, ETH/EVM,
+ * TRON), four legacy address rows (BTC, ETH, USDT/TRC20, LTC), and profile mirrors.
+ * ETH, USDT/ERC20, and USDT/BEP20 intentionally share one EVM address; the returned
+ * `records` are UI/network views, not a one-to-one dump of canonical DB rows.
  */
 export async function getOrDeriveUserDepositAddresses(
   userId: string
@@ -430,7 +416,7 @@ export async function getOrDeriveUserDepositAddresses(
   // 1. Fetch user profile
   const { data: profileData, error: profileErr } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, username, display_name, wallet_index')
     .eq('id', userId)
     .maybeSingle();
 
@@ -442,15 +428,20 @@ export async function getOrDeriveUserDepositAddresses(
 
   // 2. Resolve wallet_index (Fail-closed if missing or invalid)
   const walletIndex = profile.wallet_index;
-  if (walletIndex === null || walletIndex === undefined || typeof walletIndex !== 'number' || walletIndex <= 0) {
-    throw new Error(`Fail-closed: User profile ${userId} has no valid allocated wallet_index. Address derivation cannot proceed.`);
+  if (
+    typeof walletIndex !== 'number' ||
+    !Number.isSafeInteger(walletIndex) ||
+    walletIndex <= 0 ||
+    walletIndex > 0x7fffffff
+  ) {
+    throw new Error(`Fail-closed: User profile ${userId} has no valid positive BIP-32 wallet_index. Address derivation cannot proceed.`);
   }
 
   // 3. Derive authoritative addresses for this walletIndex
   const addresses = await deriveAllAddressesAsync(walletIndex);
 
   // 4. Execute canonical atomic provisioning via database RPC
-  const { error: rpcError } = await supabase.rpc('provision_user_wallets_atomic', {
+  const { data: rpcData, error: rpcError } = await supabase.rpc('provision_user_wallets_atomic', {
     p_user_id: userId,
     p_wallet_index: walletIndex,
     p_evm_address: addresses.ETH,
@@ -461,6 +452,39 @@ export async function getOrDeriveUserDepositAddresses(
 
   if (rpcError) {
     throw new Error(`Atomic provisioning RPC failed: ${rpcError.message}`);
+  }
+
+  let rpcResult: unknown = rpcData;
+  if (typeof rpcResult === 'string') {
+    try {
+      rpcResult = JSON.parse(rpcResult);
+    } catch {
+      throw new Error('Atomic provisioning RPC returned invalid JSON.');
+    }
+  }
+
+  if (!rpcResult || typeof rpcResult !== 'object' || Array.isArray(rpcResult)) {
+    throw new Error('Atomic provisioning RPC returned no verifiable result.');
+  }
+
+  const provisioned = rpcResult as Record<string, unknown>;
+  const persistedAddresses = provisioned.addresses as Record<string, unknown> | null;
+  const persistedWallets = provisioned.wallets as Record<string, unknown> | null;
+  const requiredWalletIds = ['evm_wallet_id', 'tron_wallet_id', 'btc_wallet_id', 'ltc_wallet_id'];
+
+  if (
+    provisioned.success !== true ||
+    provisioned.user_id !== userId ||
+    Number(provisioned.wallet_index) !== walletIndex ||
+    !persistedAddresses ||
+    persistedAddresses.evm !== addresses.ETH ||
+    persistedAddresses.tron !== addresses.USDT_TRC20 ||
+    persistedAddresses.btc !== addresses.BTC ||
+    persistedAddresses.ltc !== addresses.LTC ||
+    !persistedWallets ||
+    !requiredWalletIds.every((key) => typeof persistedWallets[key] === 'string' && (persistedWallets[key] as string).trim().length > 0)
+  ) {
+    throw new Error('Atomic provisioning RPC result did not match the requested user, index, wallet IDs, and derived addresses.');
   }
 
   // 5. Build raw asset records for caller response

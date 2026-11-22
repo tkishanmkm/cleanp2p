@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAdminStatus } from '@/hooks/use-admin-status';
 import { getAdminWalletOverview, type AdminWalletMetrics } from '@/lib/supabase/db';
-import { checkSupabaseConfig, supabase } from '@/lib/supabase/client';
+import { checkSupabaseConfig } from '@/lib/supabase/client';
 import {
   Wallet,
   Coins,
@@ -21,7 +21,6 @@ import {
   Clock,
   AlertCircle,
   Loader2,
-  Copy,
   Shield,
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -72,64 +71,34 @@ export default function AdminWalletsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = async (): Promise<boolean> => {
     try {
-      // 1. Fetch from comprehensive admin wallets API
-      const res = await fetch("/api/admin/wallets");
-      const json = await res.json();
-      if (json.success && json.metrics) {
-        const m = json.metrics;
-        setMetrics({
-          totalWallets: m.walletsAndCustody?.totalUserWallets || 0,
-          totalBalances: {
-            BTC: {
-              available: m.systemBalances?.BTC?.user_available || 0,
-              locked_escrow: m.systemBalances?.BTC?.escrow_locked || 0,
-              locked_withdrawal: 0,
-            },
-            ETH: {
-              available: m.systemBalances?.ETH?.user_available || 0,
-              locked_escrow: m.systemBalances?.ETH?.escrow_locked || 0,
-              locked_withdrawal: 0,
-            },
-            LTC: {
-              available: m.systemBalances?.LTC?.user_available || 0,
-              locked_escrow: m.systemBalances?.LTC?.escrow_locked || 0,
-              locked_withdrawal: 0,
-            },
-            USDT: {
-              available: m.systemBalances?.USDT?.user_available || 0,
-              locked_escrow: m.systemBalances?.USDT?.escrow_locked || 0,
-              locked_withdrawal: 0,
-            },
-          },
-          provisioningQueue: {
-            queued: 0,
-            processing: 0,
-            completed: m.walletsAndCustody?.totalUserWallets || 0,
-            failed: 0,
-            total_users: m.walletsAndCustody?.totalUserWallets || 0,
-            provisioned_wallets: m.walletsAndCustody?.totalUserWallets || 0,
-          },
-          platformWallets: m.walletsAndCustody?.platformWallets || [],
-          // Attach full extended metrics
-          ...m,
-        } as any);
-        setLoading(false);
-        setRefreshing(false);
-        return;
+      const { data, error } = await getAdminWalletOverview();
+      if (error || !data) {
+        throw error || new Error('Platform wallet metrics are unavailable.');
       }
-    } catch (apiErr) {
-      console.warn("API wallets fetch fallback:", apiErr);
-    }
 
-    try {
-      const { data } = await getAdminWalletOverview();
-      if (data && data.totalWallets > 0) {
-        setMetrics(data);
-      }
-    } catch (err) {
-      console.error('Error fetching admin wallet metrics:', err);
+      const defaults = {
+        BTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        ETH: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        LTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        USDT: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        TRX: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+      };
+
+      setMetrics({
+        ...data,
+        totalBalances: { ...defaults, ...data.totalBalances },
+      });
+      return true;
+    } catch (error) {
+      console.error('Error fetching authoritative admin wallet metrics:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Wallet metrics unavailable',
+        description: error instanceof Error ? error.message : 'The platform wallet report could not be verified.',
+      });
+      return false;
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -144,22 +113,19 @@ export default function AdminWalletsPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchMetrics();
-    toast({ title: 'Refreshed', description: 'Wallet metrics and queue statuses updated.' });
+    const refreshed = await fetchMetrics();
+    if (refreshed) {
+      toast({ title: 'Refreshed', description: 'Authoritative wallet and custody-balance records updated.' });
+    }
   };
 
-  const copyAddress = (addr: string) => {
-    navigator.clipboard.writeText(addr);
-    toast({ title: 'Copied', description: 'Address copied to clipboard' });
-  };
-
-  const filteredPlatformWallets = metrics.platformWallets.filter(
-    (pw) =>
-      pw.asset_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      pw.network_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      pw.public_address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      pw.wallet_type.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredPlatformWallets = metrics.platformWallets.filter((wallet) => {
+    const search = searchQuery.trim().toLowerCase();
+    return !search ||
+      wallet.currency.toLowerCase().includes(search) ||
+      wallet.type.toLowerCase().includes(search) ||
+      wallet.id.toLowerCase().includes(search);
+  });
 
   const supabaseConfig = checkSupabaseConfig();
 
@@ -196,33 +162,27 @@ export default function AdminWalletsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Provisioning Queue</CardTitle>
+            <CardTitle className="text-sm font-medium">Deposit Address Records</CardTitle>
             <Layers className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-500">
-              {loading
-                ? '...'
-                : `${metrics.provisioningQueue.completed} / ${
-                    metrics.provisioningQueue.total_users || metrics.totalWallets
-                  }`}
+              {loading ? '...' : (metrics.totalDepositAddresses || 0)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {metrics.provisioningQueue.queued > 0
-                ? `${metrics.provisioningQueue.queued} queued for generation`
-                : '100% deposit addresses provisioned'}
+              {`${metrics.totalDepositAddresses || 0} deposit-address records currently stored`}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Platform Custody</CardTitle>
+            <CardTitle className="text-sm font-medium">Custody Balance Records</CardTitle>
             <ShieldCheck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{loading ? '...' : metrics.platformWallets.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">Active Hot / Cold operational vaults</p>
+            <p className="text-xs text-muted-foreground mt-1">Actual platform custody balance records</p>
           </CardContent>
         </Card>
 
@@ -239,7 +199,7 @@ export default function AdminWalletsPage() {
                 }`}
               />
               <div className="text-sm font-semibold">
-                {supabaseConfig.isConfigured ? 'Atomic RPC Active' : 'Hybrid Engine'}
+                {supabaseConfig.isConfigured ? 'Supabase Configured' : 'Supabase Not Configured'}
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-1">Double-entry ledger & escrow RPCs</p>
@@ -420,9 +380,9 @@ export default function AdminWalletsPage() {
         <TabsContent value="provisioning" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Deposit Address Provisioning Queue</CardTitle>
+              <CardTitle>Deposit Address Records</CardTitle>
               <CardDescription>
-                Status of unique custodial deposit address allocation per user and chain.
+                Count of deposit-address records currently stored in the production database. Queue state is not inferred when no queue table is configured.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -430,10 +390,10 @@ export default function AdminWalletsPage() {
                 <div className="p-4 border rounded-lg bg-emerald-500/10 border-emerald-500/20">
                   <div className="flex items-center gap-2 text-emerald-500 font-semibold mb-1">
                     <CheckCircle2 className="h-4 w-4" />
-                    <span>Completed</span>
+                    <span>Address Records</span>
                   </div>
                   <div className="text-2xl font-bold">{metrics.provisioningQueue.completed}</div>
-                  <p className="text-xs text-muted-foreground">Users with assigned deposit sets</p>
+                  <p className="text-xs text-muted-foreground">Address rows stored; a user may have multiple networks</p>
                 </div>
 
                 <div className="p-4 border rounded-lg bg-amber-500/10 border-amber-500/20">
@@ -444,7 +404,7 @@ export default function AdminWalletsPage() {
                   <div className="text-2xl font-bold">
                     {metrics.provisioningQueue.queued + metrics.provisioningQueue.processing}
                   </div>
-                  <p className="text-xs text-muted-foreground">Pending background derivation</p>
+                  <p className="text-xs text-muted-foreground">Queue state is not available from the deployed schema</p>
                 </div>
 
                 <div className="p-4 border rounded-lg bg-rose-500/10 border-rose-500/20">
@@ -453,7 +413,7 @@ export default function AdminWalletsPage() {
                     <span>Failed / Retrying</span>
                   </div>
                   <div className="text-2xl font-bold">{metrics.provisioningQueue.failed}</div>
-                  <p className="text-xs text-muted-foreground">Requires manual intervention</p>
+                  <p className="text-xs text-muted-foreground">No queue failure state is exposed by the deployed schema</p>
                 </div>
               </div>
 
@@ -474,9 +434,9 @@ export default function AdminWalletsPage() {
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <CardTitle>Platform Custody Reference Vaults</CardTitle>
+                <CardTitle>Platform Custody Balance Records</CardTitle>
                 <CardDescription>
-                  Hot and cold operational wallets utilized for liquidity rebalancing and payout execution.
+                  Only currency balance snapshots stored in admin_main_wallets are listed here. The deployed schema does not store wallet addresses, network roles or custody providers in this table.
                 </CardDescription>
               </div>
               <div className="relative w-full sm:w-64">
@@ -495,19 +455,18 @@ export default function AdminWalletsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Asset</TableHead>
-                      <TableHead>Network</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Vault Address</TableHead>
-                      <TableHead>Balance</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="text-right">Recorded Balance</TableHead>
+                      <TableHead>Record Type</TableHead>
+                      <TableHead>Last Updated</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredPlatformWallets.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
-                          No custody vaults match your filter.
+                        <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">
+                          {metrics.custodyAvailable
+                            ? 'No custody balance records match your filter.'
+                            : 'No platform custody balance records are configured in the database.'}
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -515,38 +474,18 @@ export default function AdminWalletsPage() {
                         <TableRow key={pw.id}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
-                              <CryptoIconBadge name={pw.asset_code} className="h-5 w-5" />
-                              <span>{pw.asset_code}</span>
+                              <CryptoIconBadge name={pw.currency} className="h-5 w-5" />
+                              <span>{pw.currency}</span>
                             </div>
                           </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{pw.network_code}</Badge>
+                          <TableCell className="text-right font-mono">
+                            {Number(pw.balance || 0).toLocaleString(undefined, { maximumFractionDigits: 8 })}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={pw.wallet_type === 'hot' ? 'default' : 'outline'} className="capitalize">
-                              {pw.wallet_type}
-                            </Badge>
+                            <Badge variant="outline">{pw.type}</Badge>
                           </TableCell>
-                          <TableCell className="font-mono text-xs max-w-[200px] truncate" title={pw.public_address}>
-                            {pw.public_address}
-                          </TableCell>
-                          <TableCell className="font-mono font-medium">
-                            {pw.current_balance.toLocaleString()} {pw.asset_code}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className="bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/20 border-emerald-500/30">
-                              {pw.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => copyAddress(pw.public_address)}
-                              title="Copy address"
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
+                          <TableCell className="text-muted-foreground text-xs">
+                            {pw.updated_at ? new Date(pw.updated_at).toLocaleString() : 'Not recorded'}
                           </TableCell>
                         </TableRow>
                       ))

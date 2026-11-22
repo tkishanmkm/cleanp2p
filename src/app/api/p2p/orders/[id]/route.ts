@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export async function PATCH(
   req: NextRequest,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -13,34 +11,30 @@ export async function PATCH(
     const body = await req.json();
     const { status } = body;
 
-    if (!status) {
-      return NextResponse.json({ error: 'Status is required' }, { status: 400 });
+    if (typeof status !== 'string' || !['PAID', 'COMPLETED'].includes(status)) {
+      return NextResponse.json({ error: 'Unsupported order status transition.' }, { status: 400 });
     }
 
-    const cookieStore = cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+    // Completion must go through the dedicated authenticated, atomic escrow-release endpoint.
+    // Never credit a wallet directly from this generic order-status route.
+    if (status === 'COMPLETED') {
+      return NextResponse.json(
+        { error: 'Use the dedicated trade escrow-release endpoint to complete a trade.' },
+        { status: 409 }
+      );
+    }
+
     const supabaseAdmin = getSupabaseAdminClient();
-
-    let userId: string | null = null;
-
     const authHeader = req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const { data } = await supabaseAdmin.auth.getUser(token);
-      if (data?.user) userId = data.user.id;
-    }
+    const bearerToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.replace(/^Bearer\s+/i, '').trim()
+      : null;
+    const authClient = bearerToken ? createBearerClient(bearerToken) : await createClient();
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
+    const userId = authError ? null : user?.id ?? null;
 
     if (!userId) {
-      const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-        },
-      });
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) userId = user.id;
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // 1. Fetch current order
@@ -54,28 +48,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // Authorization checks based on status transitions
-    if (status === 'PAID') {
-      if (userId && order.buyer_id && order.buyer_id !== userId) {
-        return NextResponse.json({ error: 'Only buyer can mark order as paid' }, { status: 403 });
-      }
-    } else if (status === 'COMPLETED') {
-      if (userId && order.seller_id && order.seller_id !== userId) {
-        return NextResponse.json({ error: 'Only seller can release escrow' }, { status: 403 });
-      }
-
-      // If completing, credit buyer's balance in Supabase
-      if (order.buyer_id && order.crypto_amount) {
-        await supabaseAdmin.rpc('credit_user_balance', {
-          target_user_id: order.buyer_id,
-          target_asset: order.crypto_asset || 'USDT',
-          target_network: order.network || 'ethereum',
-          credit_amount: order.crypto_amount,
-        });
-      }
+    // Only the authenticated buyer may mark their own order as paid.
+    if (!order.buyer_id || order.buyer_id !== userId) {
+      return NextResponse.json({ error: 'Only the order buyer can mark it as paid.' }, { status: 403 });
     }
 
-    // 2. Update order record
+    const currentStatus = String(order.status || '').toUpperCase();
+    if (!['ACTIVE', 'PENDING', 'CREATED', 'ESCROW_LOCKED'].includes(currentStatus)) {
+      return NextResponse.json({ error: 'This order cannot transition to PAID from its current state.' }, { status: 409 });
+    }
+
+    // Compare-and-set the observed status to prevent stale/replayed transitions.
     const { data: updatedOrder, error: updateErr } = await supabaseAdmin
       .from('p2p_orders')
       .update({
@@ -83,11 +66,15 @@ export async function PATCH(
         updated_at: new Date().toISOString(),
       })
       .eq('id', orderId)
+      .eq('status', order.status)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateErr) {
-      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      return NextResponse.json({ error: 'Unable to update order status.' }, { status: 500 });
+    }
+    if (!updatedOrder) {
+      return NextResponse.json({ error: 'Order status changed; refresh and try again.' }, { status: 409 });
     }
 
     return NextResponse.json({
