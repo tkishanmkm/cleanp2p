@@ -9,7 +9,10 @@ async function verifyAdmin() {
   if (!auth.authorized || !auth.adminId) {
     throw new Error("Unauthorized: Administrator privileges required.");
   }
-  return auth.adminId;
+  return {
+    adminId: auth.adminId,
+    adminEmail: auth.adminEmail || auth.user.email || null,
+  };
 }
 
 export async function resolveDispute({
@@ -23,61 +26,45 @@ export async function resolveDispute({
   winnerId: string;
   resolutionReason: string;
 }) {
-  const adminId = await verifyAdmin();
+  const { adminId, adminEmail } = await verifyAdmin();
   const adminSupabase = createAdminClient();
 
-  // 1. Fetch trade record to verify counterparties
-  const { data: trade, error: tradeFetchError } = await adminSupabase
+  const cleanReason = String(resolutionReason || "").trim();
+  if (cleanReason.length > 2000) throw new Error("Resolution notes cannot exceed 2,000 characters.");
+
+  const { data: trade, error: tradeError } = await adminSupabase
     .from("trades")
     .select("id, buyer_id, seller_id")
     .eq("id", tradeId)
-    .single();
+    .maybeSingle();
+  if (tradeError || !trade) throw new Error(`Trade not found: ${tradeError?.message || "Invalid trade ID"}`);
 
-  if (tradeFetchError || !trade) {
-    throw new Error(`Trade not found: ${tradeFetchError?.message || 'Invalid trade ID'}`);
-  }
-
-  // 2. Perform canonical financial settlement
-  if (winnerId === trade.seller_id) {
-    // Seller wins: atomic cancellation and locked escrow refund to seller
-    const { data: rpcData, error: rpcError } = await adminSupabase.rpc('cancel_p2p_trade', {
-      p_trade_id: tradeId,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade and refund escrow.';
-      throw new Error(`Cancellation settlement failed: ${errorMsg}`);
-    }
-  } else if (winnerId === trade.buyer_id) {
-    // Buyer wins: atomic escrow release and credit to buyer
-    const { data: rpcData, error: rpcError } = await adminSupabase.rpc('release_trade_escrow', {
-      p_trade_id: tradeId,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow to buyer.';
-      throw new Error(`Escrow release settlement failed: ${errorMsg}`);
-    }
-  } else {
-    throw new Error('Invalid winner: winner must be either trade buyer or seller.');
-  }
-
-  // 3. Update dispute status only after successful financial settlement
-  const { error: disputeError } = await adminSupabase
+  const { data: dispute, error: disputeError } = await adminSupabase
     .from("disputes")
-    .update({
-      status: "resolved",
-      winner_id: winnerId,
-      resolution_reason: resolutionReason,
-      resolved_by: adminId,
-      resolved_at: new Date().toISOString(),
-    })
-    .eq("id", disputeId);
+    .select("id, trade_id, status")
+    .eq("id", disputeId)
+    .maybeSingle();
+  if (disputeError || !dispute) throw new Error(`Dispute not found: ${disputeError?.message || "Invalid dispute ID"}`);
+  if (String(dispute.trade_id) !== String(trade.id)) throw new Error("Dispute does not belong to the supplied trade.");
 
-  if (disputeError) throw new Error(`Dispute update failed: ${disputeError.message}`);
+  const isBuyerWinner = winnerId === String(trade.buyer_id);
+  const isSellerWinner = winnerId === String(trade.seller_id);
+  if (!isBuyerWinner && !isSellerWinner) throw new Error("Winner must be either the trade buyer or seller.");
+
+  const { data, error } = await adminSupabase.rpc("resolve_trade_dispute_with_audit", {
+    p_dispute_id: disputeId,
+    p_resolution: isBuyerWinner ? "RELEASE" : "CANCEL",
+    p_winner_id: winnerId,
+    p_caller_id: adminId,
+    p_admin_email: adminEmail,
+    p_notes: cleanReason || null,
+  });
+
+  if (error || !data || data.success !== true) {
+    throw new Error(error?.message || data?.message || "Atomic dispute settlement failed.");
+  }
 
   revalidatePath("/adminnarayan/disputes");
   revalidatePath("/adminnarayan/dashboard");
+  return { success: true, data };
 }

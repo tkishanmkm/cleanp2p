@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { getDiditServerConfig } from '@/lib/didit-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,11 @@ export async function POST(req: NextRequest) {
       userId = requestedUserId;
     }
 
+    const diditConfig = getDiditServerConfig();
+    if (!diditConfig) {
+      return NextResponse.json({ error: 'Verification service is not configured' }, { status: 503 });
+    }
+    const { apiKey, workflowId, sessionUrl: targetUrl, callbackUrl } = diditConfig;
     const supabase = getSupabaseAdminClient();
 
     // 1. Fetch user record
@@ -86,21 +92,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Prepare Didit Session Call
-    const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
-    const diditBase = rawBaseUrl.replace(/\/+$/, '');
-    const targetUrl = `${diditBase}/session/`;
 
-    const workflowId = process.env.DIDIT_WORKFLOW_ID || 'b36ac1aa-29fc-4272-8939-c1d184d072fd';
-    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
-    const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
-
-    const apiKey = process.env.DIDIT_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'DIDIT_API_KEY is not configured in environment.' },
-        { status: 500 }
-      );
-    }
 
     const diditRes = await fetch(targetUrl, {
       method: 'POST',

@@ -226,45 +226,28 @@ export async function resolveDispute(
   const winnerUsername = winnerId === trade.buyerId ? trade.buyer?.username || 'Buyer' : trade.seller?.username || 'Seller';
   const isSellerWinner = winnerId === trade.sellerId;
 
-  if (isSellerWinner) {
-    const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
-      p_trade_id: trade.id,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute seller cancellation settlement failed.';
-      console.error('resolveDispute seller cancel_p2p_trade RPC failed:', errorMsg);
-      throw new Error(errorMsg);
-    }
-  } else {
-    const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
-      p_trade_id: trade.id,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute buyer release_trade_escrow RPC failed.';
-      console.error('resolveDispute buyer release_trade_escrow RPC failed:', errorMsg);
-      throw new Error(errorMsg);
-    }
+  const resolution = isSellerWinner ? 'CANCEL' : 'RELEASE';
+  const response = await fetch('/api/admin/disputes/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      disputeId: dispute.id,
+      tradeId: trade.id,
+      resolution,
+      notes: `Dispute awarded to ${winnerUsername} by moderator.`,
+    }),
+  });
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    throw new Error(responseData?.error || 'Atomic dispute resolution failed.');
   }
-
-  await supabase
-    .from('disputes')
-    .update({
-      status: 'resolved',
-      winner_id: winnerId,
-      resolved_by: adminId,
-      resolution_note: `Dispute awarded to ${winnerUsername} by moderator.`,
-    })
-    .eq('id', dispute.id);
 
   await supabase.from('trade_messages').insert([
     {
       trade_id: trade.id,
       sender_id: '00000000-0000-0000-0000-000000000000',
-      sender_username: 'Paxones System',
+      sender_username: 'Wayones System',
       message: `Dispute resolved. The trade has been awarded to ${winnerUsername}.`,
       is_moderator: true,
       created_at: new Date().toISOString(),
@@ -380,14 +363,16 @@ export async function adminUnblockUser(
 }
 
 export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ action: 'intervene', interveneAction: 'refund', reason }),
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin cancel_p2p_trade RPC failed.';
-    console.error('adminCancelTrade RPC error:', errorMsg);
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    const errorMsg = responseData?.error || 'Admin trade refund failed.';
+    console.error('adminCancelTrade API error:', errorMsg);
     throw new Error(errorMsg);
   }
 
@@ -402,14 +387,16 @@ export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, 
 }
 
 export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('mark_p2p_trade_paid', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ action: 'mark_paid', reason }),
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin mark_p2p_trade_paid RPC failed.';
-    console.error('adminMarkTradeAsPaid RPC error:', errorMsg);
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    const errorMsg = responseData?.error || 'Admin mark-paid action failed.';
+    console.error('adminMarkTradeAsPaid API error:', errorMsg);
     throw new Error(errorMsg);
   }
 
@@ -424,14 +411,16 @@ export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: stri
 }
 
 export async function adminReleaseFunds(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ action: 'intervene', interveneAction: 'release', reason }),
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin release_trade_escrow RPC failed.';
-    console.error('adminReleaseFunds RPC error:', errorMsg);
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    const errorMsg = responseData?.error || 'Admin escrow release failed.';
+    console.error('adminReleaseFunds API error:', errorMsg);
     throw new Error(errorMsg);
   }
 

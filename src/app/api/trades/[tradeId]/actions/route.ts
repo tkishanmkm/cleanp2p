@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import { verify2FAOTP } from '@/lib/2fa';
@@ -6,7 +8,7 @@ import { verify2FAOTP } from '@/lib/2fa';
 export const dynamic = 'force-dynamic';
 
 export async function POST(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
@@ -20,7 +22,7 @@ export async function POST(
     const supabase = await createClient();
 
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || null;
 
     let user: any = null;
     if (bearerToken) {
@@ -37,6 +39,18 @@ export async function POST(
     }
 
     const adminClient = getSupabaseAdminClient();
+    let userRpcClient: any = supabase;
+    if (bearerToken) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      if (!supabaseUrl || !anonKey) {
+        return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+      }
+      userRpcClient = createSupabaseJsClient(supabaseUrl, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+        global: { headers: { Authorization: `Bearer ${bearerToken}` } },
+      });
+    }
 
     const body = await req.json().catch(() => ({}));
     const { action, reason, receiptUrl } = body;
@@ -186,7 +200,7 @@ export async function POST(
       }
 
       // Execute Atomic Database RPC mark_p2p_trade_paid
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('mark_p2p_trade_paid', {
+      const { data: rpcData, error: rpcError } = await userRpcClient.rpc('mark_p2p_trade_paid', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
         p_payment_method: confirmedPaymentMethod,
@@ -239,44 +253,51 @@ export async function POST(
     }
 
     if (action === 'RELEASE_ESCROW') {
-      // Ensure caller is the seller
-      if (trade?.seller_id && trade.seller_id !== user.id) {
+      // Require a real seller identity; missing trade/owner data must fail closed.
+      if (!trade || String(trade.seller_id) !== user.id) {
         return NextResponse.json({ error: 'Only the seller can release escrow.' }, { status: 403 });
       }
 
-      // Verify seller can only release when buyer marked paid OR when trade is in dispute
-      const rawStatus = String(trade?.status || '').toLowerCase();
-      const rawEscrowStatus = String(trade?.escrow_status || '').toUpperCase();
-      const isPaid = Boolean(trade?.paid_at || trade?.marked_paid_at || rawEscrowStatus === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(rawStatus));
-      const isDisputed = Boolean(rawStatus === 'disputed' || rawEscrowStatus === 'DISPUTED');
+      // Seller release is permitted only after payment, never while a dispute is active.
+      const rawStatus = String(trade.status || '').toLowerCase().trim();
+      const rawEscrowStatus = String(trade.escrow_status || '').toUpperCase().trim();
+      const isPaid = Boolean(trade.paid_at || trade.marked_paid_at || rawEscrowStatus === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(rawStatus));
+      const isDisputed = Boolean(trade.is_disputed || rawStatus === 'disputed' || rawEscrowStatus === 'DISPUTED');
+      const { data: activeDisputes, error: disputeLookupError } = await adminClient
+        .from('disputes')
+        .select('id, status')
+        .eq('trade_id', actualTradeId)
+        .limit(10);
 
-      if (!isPaid && !isDisputed) {
-        return NextResponse.json({
-          error: 'Escrow can only be released after the buyer marks the trade as paid, or if the trade is in dispute.'
-        }, { status: 400 });
+      if (disputeLookupError) {
+        console.error('Trade dispute lookup failed before seller release:', disputeLookupError);
+        return NextResponse.json({ error: 'Dispute state is temporarily unavailable.' }, { status: 503 });
+      }
+      const hasOpenDispute = (activeDisputes || []).some((item) =>
+        ['open', 'pending', 'in_review', 'investigating'].includes(String(item.status || '').toLowerCase().trim())
+      );
+      if (isDisputed || hasOpenDispute) {
+        return NextResponse.json({ error: 'Disputed trades must be resolved through the administrator dispute workflow.' }, { status: 409 });
+      }
+      if (!isPaid) {
+        return NextResponse.json({ error: 'Escrow can only be released after the buyer marks the trade as paid.' }, { status: 400 });
       }
 
-      // 2FA check for sensitive trade release operation
-      const { data: sellerProfile } = await adminClient
+      // 2FA lookup failures must never silently disable the seller's configured verification.
+      const { data: sellerProfile, error: sellerProfileError } = await adminClient
         .from('profiles')
         .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
         .eq('id', user.id)
         .maybeSingle();
+      if (sellerProfileError || !sellerProfile) {
+        console.error('Seller security profile lookup failed:', sellerProfileError);
+        return NextResponse.json({ error: 'Seller security settings are temporarily unavailable.' }, { status: 503 });
+      }
 
-      const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled || sellerProfile?.two_factor_enabled);
-      const secret = sellerProfile?.totp_secret || sellerProfile?.two_factor_secret;
-
-      if (is2faActive) {
-        if (!totpCode) {
-          return NextResponse.json(
-            { error: 'TWO_FACTOR_REQUIRED: 2FA TOTP code is required to release escrow.' },
-            { status: 403 }
-          );
-        }
-        const isValid = verify2FAOTP(secret, String(totpCode).trim(), is2faActive);
-        if (!isValid) {
-          return NextResponse.json({ error: 'Invalid 2FA authentication code.' }, { status: 401 });
-        }
+      const is2faActive = Boolean(sellerProfile.is_2fa_enabled || sellerProfile.is_mfa_enabled || sellerProfile.two_factor_enabled);
+      const secret = sellerProfile.totp_secret || sellerProfile.two_factor_secret;
+      if (is2faActive && (!totpCode || !secret || !verify2FAOTP(secret, String(totpCode).trim(), true))) {
+        return NextResponse.json({ error: 'A valid 2FA code is required to release escrow.' }, { status: 401 });
       }
 
       // Canonical RPC call
@@ -331,7 +352,7 @@ export async function POST(
       const now = new Date().toISOString();
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('cancel_p2p_trade', {
+      const { data: rpcData, error: rpcError } = await userRpcClient.rpc('cancel_p2p_trade', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
       });
@@ -378,14 +399,13 @@ export async function POST(
         return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
       }
 
-      // Check caller authorization: buyer, seller, or admin
-      const isParticipant = user.id === trade.buyer_id || user.id === trade.seller_id;
-      const isAdmin =
-        user.app_metadata?.role === 'admin' ||
-        user.user_metadata?.role === 'admin';
-
-      if (!isParticipant && !isAdmin) {
-        return NextResponse.json({ error: 'Unauthorized: Only trade participants or administrators can trigger trade expiration.' }, { status: 403 });
+      // Participants may request expiry; non-participant overrides require the verified admin boundary.
+      const isParticipant = user.id === String(trade.buyer_id) || user.id === String(trade.seller_id);
+      if (!isParticipant) {
+        const adminAuth = await verifyServerAdmin(req);
+        if (!adminAuth.authorized) {
+          return adminAuth.response || NextResponse.json({ error: 'Only trade participants or active administrators can trigger expiration.' }, { status: 403 });
+        }
       }
 
       // Check terminal status

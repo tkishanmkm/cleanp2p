@@ -159,12 +159,7 @@ export async function POST(req: NextRequest) {
       .eq('id', user.id)
       .maybeSingle();
 
-    const hasFullName = Boolean(
-      buyerProfile?.full_name?.trim() ||
-      buyerProfile?.display_name?.trim() ||
-      user.user_metadata?.full_name?.trim() ||
-      user.user_metadata?.name?.trim()
-    );
+    const hasFullName = Boolean(buyerProfile?.full_name?.trim());
     const isKycVerified = isTier2User(buyerProfile);
 
     if (ad.require_full_name_verified && !hasFullName) {
@@ -181,47 +176,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
-    if (!isKycVerified) {
-      const userFiatCurrency = (ad.fiat_currency || ad.fiat || 'USD').toUpperCase();
-      let fiatToUsdRate = 1.0;
-      if (userFiatCurrency === 'INR') fiatToUsdRate = 1 / 85.0;
-      else if (userFiatCurrency === 'EUR') fiatToUsdRate = 1.08;
-      else if (userFiatCurrency === 'GBP') fiatToUsdRate = 1.28;
-      else if (userFiatCurrency === 'CAD' || userFiatCurrency === 'AUD') fiatToUsdRate = 0.68;
-      else if (userFiatCurrency === 'AED') fiatToUsdRate = 0.27;
+    // The canonical database RPC enforces the authoritative lifetime USD buy limit.
 
-      const currentTradeUsd = numericFiat * fiatToUsdRate;
-
-      const { data: pastTrades } = await supabase
-        .from('trades')
-        .select('fiat_amount, fiat_currency, status')
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .in('status', ['COMPLETED', 'completed', 'PAID', 'paid', 'ESCROW_LOCKED', 'in_escrow', 'DISPUTED']);
-
-      let priorTradedUsd = 0;
-      if (pastTrades && pastTrades.length > 0) {
-        for (const t of pastTrades) {
-          const curr = (t.fiat_currency || 'USD').toUpperCase();
-          let rate = 1.0;
-          if (curr === 'INR') rate = 1 / 85.0;
-          else if (curr === 'EUR') rate = 1.08;
-          else if (curr === 'GBP') rate = 1.28;
-          else if (curr === 'CAD' || curr === 'AUD') rate = 0.68;
-          else if (curr === 'AED') rate = 0.27;
-          priorTradedUsd += (Number(t.fiat_amount) || 0) * rate;
-        }
-      }
-
-      if (priorTradedUsd + currentTradeUsd > 1000) {
-        return NextResponse.json(
-          {
-            error: `Unverified accounts have a cumulative limit of $1,000 USD in total trades (Current history: $${priorTradedUsd.toFixed(2)} USD). Please complete Identity Verification in Settings to trade without limits.`,
-          },
-          { status: 403 }
-        );
-      }
-    }
 
     // 7. Resolve Payment Method & Currency
     const paymentMethods = Array.isArray(ad.payment_methods)

@@ -6,8 +6,44 @@ import { USER_2FA_COOKIE_NAME, verifyUser2FASessionToken } from '@/lib/user-2fa-
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+  const pathname = request.nextUrl.pathname;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const isMachineAuthenticatedApi =
+    pathname.startsWith('/api/webhooks/') ||
+    pathname.startsWith('/api/cron/') ||
+    pathname.startsWith('/api/didit/webhook') ||
+    pathname.startsWith('/api/kyc/webhook');
+
+  const isProtectedPage =
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/adminnarayan') ||
+    pathname.startsWith('/wallet') ||
+    pathname.startsWith('/trade') ||
+    pathname.startsWith('/buy') ||
+    pathname.startsWith('/sell') ||
+    pathname.startsWith('/transfer') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/profile');
+
+  if (!supabaseUrl || !supabaseKey) {
+    if (isMachineAuthenticatedApi) return NextResponse.next();
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+    }
+    const isPublicAuthPage =
+      pathname === '/' ||
+      pathname.startsWith('/login') ||
+      pathname.startsWith('/register') ||
+      pathname.startsWith('/auth') ||
+      pathname.startsWith('/adminnarayan/login');
+    if (isPublicAuthPage || !isProtectedPage) return NextResponse.next();
+
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = pathname.startsWith('/adminnarayan') ? '/adminnarayan/login' : '/login';
+    redirectUrl.searchParams.set('error', 'auth_unavailable');
+    return NextResponse.redirect(redirectUrl);
+  }
 
   try {
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
@@ -80,14 +116,24 @@ export async function middleware(request: NextRequest) {
         const isPreventLoginOn = sysSettings?.some((s: any) => s.key === 'prevent_user_login' && (s.value === 'true' || s.value === true));
 
         if (isEmergencyOn || isMaintenanceOn || isPreventLoginOn) {
-          let isAdmin = user?.app_metadata?.role === 'admin';
-          if (!isAdmin && user) {
-            const { data: prof } = await supabase
+          let isAdmin = false;
+          if (user) {
+            const { data: prof, error: profError } = await supabase
               .from('profiles')
-              .select('role, is_admin, is_admin_account')
+              .select('role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status')
               .eq('id', user.id)
               .maybeSingle();
-            isAdmin = prof?.role === 'admin' || prof?.is_admin === true || prof?.is_admin_account === true;
+
+            const status = String(prof?.account_status || prof?.status || '').trim().toLowerCase();
+            const activeProfile = Boolean(prof) &&
+              prof?.is_banned !== true &&
+              prof?.is_restricted !== true &&
+              prof?.is_on_hold !== true &&
+              prof?.is_suspended !== true &&
+              !['banned', 'restricted', 'suspended', 'on_hold', 'hold', 'frozen', 'disabled', 'closed', 'deleted', 'deletion_pending'].includes(status);
+
+            isAdmin = !profError && activeProfile &&
+              (prof?.role === 'admin' || prof?.is_admin === true || prof?.is_admin_account === true);
           }
 
           // If not admin, apply emergency / maintenance / login-disabled rules
@@ -196,33 +242,32 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(url);
       }
 
-      // 2. Check Role in App Metadata, Profiles Table, or verify RPC
-      let userRole = user.app_metadata?.role;
+      // 2. Use the current database profile as the authority; never trust stale JWT role claims.
+      const { data: adminProfileCheck, error: adminProfileError } = await supabase
+        .from('profiles')
+        .select('role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status')
+        .eq('id', user.id)
+        .maybeSingle();
 
-      if (!userRole) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role, is_admin')
-          .eq('id', user.id)
-          .maybeSingle();
-        
-        userRole = (profile?.role === 'admin' || profile?.is_admin === true) ? 'admin' : profile?.role;
-      }
+      const adminAccountStatus = String(adminProfileCheck?.account_status || adminProfileCheck?.status || '').trim().toLowerCase();
+      const activeAdminProfile = Boolean(adminProfileCheck) &&
+        adminProfileCheck?.is_banned !== true &&
+        adminProfileCheck?.is_restricted !== true &&
+        adminProfileCheck?.is_on_hold !== true &&
+        adminProfileCheck?.is_suspended !== true &&
+        !['banned', 'restricted', 'suspended', 'on_hold', 'hold', 'frozen', 'disabled', 'closed', 'deleted', 'deletion_pending'].includes(adminAccountStatus);
 
-      // Fallback: Check if verify_admin_login or check_is_admin returns true
-      if (userRole !== 'admin') {
-        try {
-          const { data: isAdmin } = await supabase.rpc('check_is_admin', { p_user_id: user.id });
-          if (isAdmin) {
-            userRole = 'admin';
-          }
-        } catch (_) {
-          // ignore RPC error
-        }
-      }
+      const isAdmin =
+        !adminProfileError &&
+        activeAdminProfile &&
+        (
+          adminProfileCheck?.role === 'admin' ||
+          adminProfileCheck?.is_admin === true ||
+          adminProfileCheck?.is_admin_account === true
+        );
 
-      // 3. Reject if not admin
-      if (userRole !== 'admin') {
+      // 3. Reject if the authoritative profile check fails or no active full-admin role exists.
+      if (!isAdmin) {
         if (url.pathname.startsWith('/api/admin')) {
           return NextResponse.json({ success: false, error: 'Access denied. Administrator privileges required.' }, { status: 403 });
         }
@@ -313,8 +358,26 @@ export async function middleware(request: NextRequest) {
       }
     }
   } catch (e) {
-    // Silently continue if session read fails in middleware
-    console.warn('Middleware auth check warning:', e);
+    console.error('Middleware auth verification failed:', e);
+    if (isMachineAuthenticatedApi) return supabaseResponse;
+
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Authentication verification is temporarily unavailable.' }, { status: 503 });
+    }
+
+    const isPublicAuthPage =
+      pathname === '/' ||
+      pathname.startsWith('/login') ||
+      pathname.startsWith('/register') ||
+      pathname.startsWith('/auth') ||
+      pathname.startsWith('/adminnarayan/login');
+
+    if (!isPublicAuthPage && isProtectedPage) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = pathname.startsWith('/adminnarayan') ? '/adminnarayan/login' : '/login';
+      redirectUrl.searchParams.set('error', 'auth_unavailable');
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return supabaseResponse;

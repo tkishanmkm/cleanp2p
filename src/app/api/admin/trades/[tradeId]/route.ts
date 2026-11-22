@@ -139,7 +139,7 @@ export async function POST(
       return auth.response!;
     }
 
-    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminEmail = auth.adminEmail || auth.user.email || null;
     const adminId = auth.adminId || auth.user.id;
 
     const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
@@ -335,107 +335,64 @@ export async function POST(
       return NextResponse.json({ success: true, message: "Moderator message sent" });
     }
 
-    // 3. Moderator Escrow Intervention (Release or Refund)
+    if (action === "mark_paid") {
+      const markPaidReason = typeof reason === "string" ? reason.trim() : "";
+      if (markPaidReason.length > 2000) {
+        return NextResponse.json({ success: false, error: "Reason cannot exceed 2,000 characters." }, { status: 400 });
+      }
+      const { data: rpcData, error: rpcError } = await supabase.rpc("admin_intervene_trade_escrow", {
+        p_trade_id: trade.id,
+        p_action: "mark_paid",
+        p_caller_id: adminId,
+        p_admin_email: adminEmail,
+        p_reason: markPaidReason || null,
+      });
+      if (rpcError || !rpcData || rpcData.success !== true) {
+        return NextResponse.json({ success: false, error: rpcError?.message || rpcData?.message || "Admin mark-paid action failed." }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, message: rpcData.message || "Trade marked as paid.", data: rpcData });
+    }
+
+    // 3. Moderator escrow intervention uses one server-only atomic settlement and audit RPC.
     if (action === "intervene") {
       const isRelease = interveneAction === "release";
-      const newStatus = isRelease ? "completed" : "cancelled";
+      if (!isRelease && interveneAction !== "refund") {
+        return NextResponse.json({ success: false, error: "Intervention action must be release or refund." }, { status: 400 });
+      }
       const cryptoAsset = (trade.crypto || trade.crypto_currency || "USDT").toUpperCase();
       const cryptoAmount = parseFloat(trade.amount || trade.crypto_amount) || 0;
-      const interventionReason = reason?.trim() || `Administrative moderator ${isRelease ? "release to buyer" : "refund to seller"}`;
-
-      // Invoke canonical settlement RPCs first
-      let rpcExecuted = false;
-      let rpcErrorMsg: string | null = null;
-
-      if (isRelease) {
-        const { data: rpcData, error: rpcErr } = await supabase.rpc("release_trade_escrow", {
-          p_trade_id: trade.id,
-          p_caller_id: adminId,
-        });
-
-        if (rpcErr || (rpcData && rpcData.success === false)) {
-          rpcErrorMsg = rpcErr?.message || rpcData?.message || "Failed to release trade escrow via canonical RPC.";
-          console.warn("[API/ADMIN/TRADE_ACTION] release_trade_escrow RPC notice:", rpcErrorMsg);
-        } else {
-          rpcExecuted = true;
-        }
-      } else {
-        const { data: rpcData, error: rpcErr } = await supabase.rpc("cancel_p2p_trade", {
-          p_trade_id: trade.id,
-          p_caller_id: adminId,
-          p_reason: interventionReason,
-        });
-
-        if (rpcErr || (rpcData && rpcData.success === false)) {
-          rpcErrorMsg = rpcErr?.message || rpcData?.message || "Failed to cancel trade via canonical RPC.";
-          console.warn("[API/ADMIN/TRADE_ACTION] cancel_p2p_trade RPC notice:", rpcErrorMsg);
-        } else {
-          rpcExecuted = true;
-        }
+      const interventionReason = typeof reason === "string" ? reason.trim() : "";
+      if (interventionReason.length > 2000) {
+        return NextResponse.json({ success: false, error: "Intervention reason cannot exceed 2,000 characters." }, { status: 400 });
       }
 
-      // If canonical RPC was not successful, fail closed immediately to prevent desynchronization
-      if (!rpcExecuted) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: rpcErrorMsg || `Failed to execute ${isRelease ? "escrow release" : "escrow refund"} via canonical settlement RPC.`,
-          },
-          { status: 400 }
-        );
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("admin_intervene_trade_escrow", {
+        p_trade_id: trade.id,
+        p_action: isRelease ? "release" : "refund",
+        p_caller_id: adminId,
+        p_admin_email: adminEmail,
+        p_reason: interventionReason || null,
+      });
+      if (rpcErr || !rpcData || rpcData.success !== true) {
+        const errorMsg = rpcErr?.message || rpcData?.message || "Failed to execute atomic escrow intervention.";
+        console.error("[API/ADMIN/TRADE_ACTION] Atomic intervention failed:", errorMsg);
+        return NextResponse.json({ success: false, error: errorMsg }, { status: 400 });
       }
 
-      // Update trade status and mark dispute resolved
-      await supabase
-        .from("trades")
-        .update({
-          status: newStatus,
-          is_disputed: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", trade.id);
-
-      await supabase
-        .from("disputes")
-        .update({
-          status: "resolved",
-          reason: interventionReason,
-          resolved_at: new Date().toISOString(),
-        })
-        .eq("trade_id", trade.id);
-
-      // Insert standardized user-facing moderator decision message
       const decisionMsg = isRelease
-        ? `Paxones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`
-        : `Paxones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
-
-      await supabase.from("trade_chat_messages").insert({
+        ? `Wayones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason || "Administrative review"}`
+        : `Wayones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason || "Administrative review"}`;
+      const { error: messageError } = await supabase.from("trade_chat_messages").insert({
         trade_id: trade.id,
         sender_id: "00000000-0000-0000-0000-000000000000",
         message: decisionMsg,
       });
-
-      // Log internal audit trail with authoritative admin identity
-      await supabase.from("admin_audit_logs").insert({
-        admin_id: adminId,
-        admin_email: adminEmail,
-        action: isRelease ? "ESCROW_RELEASED_BY_ADMIN" : "ESCROW_REFUNDED_BY_ADMIN",
-        target_user_id: isRelease ? trade.buyer_id : trade.seller_id,
-        target_id: trade.id,
-        details: {
-          trade_id: trade.id,
-          action: interveneAction,
-          amount: cryptoAmount,
-          currency: cryptoAsset,
-          reason: interventionReason,
-          rpc_executed: rpcExecuted,
-          date: new Date().toISOString(),
-        },
-      });
+      if (messageError) console.warn("[API/ADMIN/TRADE_ACTION] Moderator message failed after settlement:", messageError);
 
       return NextResponse.json({
         success: true,
-        message: `Successfully executed escrow ${isRelease ? "release" : "refund"}.`,
+        message: rpcData.message || `Successfully executed escrow ${isRelease ? "release" : "refund"}.`,
+        data: rpcData,
       });
     }
 

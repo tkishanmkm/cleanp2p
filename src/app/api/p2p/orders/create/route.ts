@@ -119,12 +119,7 @@ export async function POST(req: NextRequest) {
         .eq('id', user.id)
         .maybeSingle();
 
-      const hasFullName = Boolean(
-        profile?.full_name?.trim() ||
-        profile?.display_name?.trim() ||
-        user.user_metadata?.full_name?.trim() ||
-        user.user_metadata?.name?.trim()
-      );
+      const hasFullName = Boolean(profile?.full_name?.trim());
       const isKycVerified = isTier2User(profile);
 
       if (ad.require_full_name_verified && !hasFullName) {

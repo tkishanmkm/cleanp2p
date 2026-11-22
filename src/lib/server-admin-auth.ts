@@ -46,55 +46,82 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
       };
     }
 
-    // 2. Authoritative Admin Role Verification
-    let isAdmin = false;
-
-    // Check JWT app_metadata
-    if (user.app_metadata?.role === "admin" || user.user_metadata?.role === "admin") {
-      isAdmin = true;
-    }
-
-    // Check profiles table
-    let adminProfile: any = null;
-    const { data: profile } = await adminClient
+    // 2. Authoritative Admin Role Verification.
+    // Client-controlled user_metadata and stale JWT role claims are never authorization sources.
+    const { data: profile, error: profileError } = await adminClient
       .from("profiles")
-      .select("role, is_admin, is_admin_account, email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at")
+      .select("role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status, email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (profile) {
-      adminProfile = profile;
-      if (profile.role === "admin" || profile.is_admin === true || profile.is_admin_account === true) {
-        isAdmin = true;
-      }
+    if (profileError) {
+      console.error("[verifyServerAdmin] Profile authorization lookup failed:", profileError);
+      return {
+        authorized: false,
+        response: NextResponse.json(
+          { success: false, error: "Administrator authorization is temporarily unavailable." },
+          { status: 503 }
+        ),
+      };
     }
 
-    // Check app_admins table
-    if (!isAdmin) {
-      const { data: appAdmin } = await adminClient
-        .from("app_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (appAdmin) {
-        isAdmin = true;
-      }
+    // An admin account must have a live profile and must not be banned, suspended or held.
+    if (!profile) {
+      return {
+        authorized: false,
+        response: NextResponse.json(
+          { success: false, error: "Administrator account is inactive or unavailable." },
+          { status: 403 }
+        ),
+      };
     }
 
-    // Check environment admin list fallback
-    if (!isAdmin && user.email) {
-      const configuredAdmins = (process.env.ADMIN_EMAILS || "")
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
-      
-      if (configuredAdmins.includes(user.email.toLowerCase())) {
-        isAdmin = true;
-      }
+    const accountStatus = String(profile.account_status || profile.status || "").trim().toLowerCase();
+    const profileActive =
+      profile.is_banned !== true &&
+      profile.is_restricted !== true &&
+      profile.is_on_hold !== true &&
+      profile.is_suspended !== true &&
+      !["banned", "restricted", "suspended", "on_hold", "hold", "frozen", "disabled", "closed", "deleted", "deletion_pending"].includes(accountStatus);
+
+    if (!profileActive) {
+      return {
+        authorized: false,
+        response: NextResponse.json(
+          { success: false, error: "Administrator account is inactive or unavailable." },
+          { status: 403 }
+        ),
+      };
     }
 
-    if (!isAdmin) {
+    const adminProfile: any = profile;
+    const profileAdmin =
+      profile.role === "admin" ||
+      profile.is_admin === true ||
+      profile.is_admin_account === true;
+
+    const { data: appAdmin, error: appAdminError } = await adminClient
+      .from("app_admins")
+      .select("user_id, role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (appAdminError) {
+      console.error("[verifyServerAdmin] Admin membership lookup failed:", appAdminError);
+      return {
+        authorized: false,
+        response: NextResponse.json(
+          { success: false, error: "Administrator authorization is temporarily unavailable." },
+          { status: 503 }
+        ),
+      };
+    }
+
+    const membershipAdmin =
+      appAdmin?.role === "admin" ||
+      appAdmin?.role === "superadmin";
+
+    if (!profileAdmin && !membershipAdmin) {
       return {
         authorized: false,
         response: NextResponse.json(
@@ -146,7 +173,7 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
       authorized: true,
       user,
       adminId: user.id,
-      adminEmail: user.email || "admin@paxones.com",
+      adminEmail: user.email || adminProfile.email || "",
     };
   } catch (err: any) {
     console.error("[verifyServerAdmin] Error during admin authorization check:", err);

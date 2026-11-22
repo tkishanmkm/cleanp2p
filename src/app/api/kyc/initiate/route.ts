@@ -3,6 +3,7 @@ import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { saveKycAddressToB2 } from '@/lib/b2';
 import { isTier2User } from '@/lib/kyc';
+import { getDiditServerConfig } from '@/lib/didit-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,11 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = targetUserId;
+    const diditConfig = getDiditServerConfig();
+    if (!diditConfig) {
+      return NextResponse.json({ error: 'Verification service is not configured' }, { status: 503 });
+    }
+    const { apiKey, workflowId, sessionUrl: targetUrl, callbackUrl } = diditConfig;
     const supabase = getSupabaseAdminClient();
 
     // 1. Fetch user status
@@ -142,18 +148,7 @@ export async function POST(req: NextRequest) {
       .eq('id', userId);
 
     // 4. Request session from verification service
-    const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
-    const diditBase = rawBaseUrl.replace(/\/+$/, '');
-    const targetUrl = `${diditBase}/session/`;
 
-    const apiKey = process.env.DIDIT_API_KEY;
-    const workflowId = process.env.DIDIT_WORKFLOW_ID || 'e2b3e066-d5f9-45b8-a11c-1139c27f9beb';
-    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
-    const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
-
-    if (!apiKey) {
-      return NextResponse.json({ error: 'Verification service is not configured' }, { status: 500 });
-    }
 
     let res: Response;
     try {

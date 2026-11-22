@@ -5,10 +5,60 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 
 function getSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key'
-  );
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Didit webhook Supabase configuration is missing');
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+const MAX_DIDIT_WEBHOOK_BYTES = 2 * 1024 * 1024;
+
+async function readRequestBodyBounded(req: NextRequest): Promise<string | null> {
+  const contentLength = Number(req.headers.get('content-length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_DIDIT_WEBHOOK_BYTES) return null;
+  if (!req.body) return null;
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DIDIT_WEBHOOK_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+function matchesHmacHex(expectedHex: string, providedHex: string): boolean {
+  if (!/^[0-9a-f]{64}$/i.test(providedHex)) return false;
+  const expected = Buffer.from(expectedHex, 'hex');
+  const provided = Buffer.from(providedHex, 'hex');
+  return expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
 }
 
 function shortenFloats(v: unknown): unknown {
@@ -43,15 +93,17 @@ function isApprovedStatus(val: any): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const raw = await req.text();
+    const raw = await readRequestBodyBounded(req);
+    if (raw === null) return new NextResponse('Webhook payload too large or unreadable', { status: 413 });
+
     const sigV2 = req.headers.get('x-signature-v2');
     const sigV1 = req.headers.get('x-signature');
-    const sig = sigV2 || sigV1 || '';
-    const tsHeader = req.headers.get('x-timestamp');
-    const ts = tsHeader ? Number(tsHeader) : null;
-
-    // 1. Replay attack freshness check (900 seconds / 15 mins for webhook clock skew)
-    if (ts && Math.abs(Date.now() / 1000 - ts) > 900) {
+    const tsHeader = req.headers.get('x-timestamp')?.trim() || '';
+    if (!/^\d{10}$/.test(tsHeader)) {
+      return new NextResponse('Missing or invalid timestamp', { status: 401 });
+    }
+    const ts = Number(tsHeader);
+    if (!Number.isSafeInteger(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
       return new NextResponse('Stale timestamp', { status: 401 });
     }
 
@@ -69,6 +121,11 @@ export async function POST(req: NextRequest) {
       return new NextResponse('Invalid JSON payload', { status: 400 });
     }
 
+    const bodyTimestamp = parsed?.timestamp;
+    if (!Number.isSafeInteger(bodyTimestamp) || String(bodyTimestamp) !== tsHeader) {
+      return new NextResponse('Signed body timestamp mismatch', { status: 401 });
+    }
+
     const canonical = JSON.stringify(sortKeys(shortenFloats(parsed)));
     const expected = crypto
       .createHmac('sha256', webhookSecret)
@@ -81,8 +138,8 @@ export async function POST(req: NextRequest) {
       .update(raw, 'utf8')
       .digest('hex');
 
-    const isValidV2 = sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
-    const isValidRaw = sig.length === expectedRaw.length && crypto.timingSafeEqual(Buffer.from(expectedRaw), Buffer.from(sig));
+    const isValidV2 = Boolean(sigV2) && matchesHmacHex(expected, sigV2!.trim());
+    const isValidRaw = Boolean(sigV1) && matchesHmacHex(expectedRaw, sigV1!.trim());
 
     if (!isValidV2 && !isValidRaw) {
       console.warn('[DIDIT WEBHOOK] Signature mismatch for payload');
