@@ -49,8 +49,9 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     // 2. Authoritative Admin Role Verification
     let isAdmin = false;
 
-    // Check JWT app_metadata
-    if (user.app_metadata?.role === "admin" || user.user_metadata?.role === "admin") {
+    // app_metadata is server-controlled; user_metadata is user-editable and
+    // must never be treated as an administrator grant.
+    if (user.app_metadata?.role === "admin") {
       isAdmin = true;
     }
 
@@ -58,15 +59,15 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     let adminProfile: any = null;
     const { data: profile } = await adminClient
       .from("profiles")
-      .select("role, is_admin, is_admin_account, email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at")
+      .select("email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at")
       .eq("id", user.id)
       .maybeSingle();
 
     if (profile) {
+      // The profile row is still used for the administrator's 2FA policy.
+      // Do not grant admin access from profile role/flag columns: the live
+      // profile UPDATE policy is row-based and does not protect these columns.
       adminProfile = profile;
-      if (profile.role === "admin" || profile.is_admin === true || profile.is_admin_account === true) {
-        isAdmin = true;
-      }
     }
 
     // Check app_admins table

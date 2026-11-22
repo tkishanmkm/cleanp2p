@@ -108,19 +108,36 @@ export async function POST(request: Request) {
       paymentMethods,
     } = body;
 
+    const normalizedOrderType = typeof orderType === 'string' ? orderType.trim().toUpperCase() : '';
+    const normalizedAsset = typeof assetSymbol === 'string' ? assetSymbol.trim().toUpperCase() : '';
     const price = Number(pricePerUnit);
     const min = Number(minLimit);
     const max = Number(maxLimit);
-    const totalAmount = Number(body.totalAmount) || (price > 0 ? max / price : 1000);
+    const rawTotalAmount = body.totalAmount;
+    const totalAmount = rawTotalAmount === undefined || rawTotalAmount === null || rawTotalAmount === ''
+      ? (Number.isFinite(price) && price > 0 && Number.isFinite(max) && max > 0 ? max / price : NaN)
+      : Number(rawTotalAmount);
+    const fiat = typeof fiatCurrency === 'string' && fiatCurrency.trim()
+      ? fiatCurrency.trim().toUpperCase()
+      : 'USD';
 
-    if (!orderType || !assetSymbol || !price || !min || !max) {
+    // Validate all client-controlled values before writing an order. NaN,
+    // Infinity, negative amounts and invalid enum-like values must fail closed.
+    if (
+      !['BUY', 'SELL'].includes(normalizedOrderType) ||
+      !/^[A-Z0-9]{2,12}$/.test(normalizedAsset) ||
+      !Number.isFinite(price) || price <= 0 ||
+      !Number.isFinite(min) || min <= 0 ||
+      !Number.isFinite(max) || max < min ||
+      !Number.isFinite(totalAmount) || totalAmount <= 0 ||
+      !/^[A-Z]{3,5}$/.test(fiat) ||
+      (paymentMethods !== undefined && paymentMethods !== null && !Array.isArray(paymentMethods))
+    ) {
       return NextResponse.json(
-        { success: false, error: 'Missing required order fields (orderType, assetSymbol, pricePerUnit, minLimit, maxLimit)' },
+        { success: false, error: 'Invalid order fields. Check order type, asset, price, amount, limits, currency and payment methods.' },
         { status: 400 }
       );
     }
-
-    const fiat = fiatCurrency ? String(fiatCurrency).toUpperCase() : 'USD';
     const dynamicMin = calculateMinimumFiatAmount(BASE_PLATFORM_USD_MINIMUM, fiat);
     if (min < dynamicMin) {
       return NextResponse.json(
@@ -133,9 +150,9 @@ export async function POST(request: Request) {
       .from('p2p_orders')
       .insert({
         user_id: user.id,
-        order_type: String(orderType).toUpperCase(),
-        asset_symbol: String(assetSymbol).toUpperCase(),
-        fiat_currency: fiatCurrency ? String(fiatCurrency).toUpperCase() : 'USD',
+        order_type: normalizedOrderType,
+        asset_symbol: normalizedAsset,
+        fiat_currency: fiat,
         price_per_unit: price,
         total_amount: totalAmount,
         available_amount: totalAmount,
