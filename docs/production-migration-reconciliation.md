@@ -578,3 +578,10 @@ Newly applied deposit protections (versions 20261123153730 through 2026112315445
 The Supabase project has no user/profile/wallet/deposit/ad/trade/ledger rows. Four active deposit-address registry rows reference a missing Auth user and remain unassigned. The market-price cache is stale (latest observed update 2026-10-01; none within ten minutes), so the new BUY RPC correctly refuses creation until live prices refresh. No customer funds or balances were modified.
 
 The current Windows checkout has no Supabase URL/service-role variables or local environment file, so a one-off live market-price refresh and local production-database integration test were not attempted. Render Free has no background-worker/cron compute; Supabase pg_cron has no active scheduled financial jobs and Vault has no secrets. The worker daemon is now default-off with separate approval flags for deposit credits, withdrawal broadcast/settlement, sweeps and P2P settlement. All flags remain off.
+
+
+## Internal transfer and escrow fee reconciliation — 2026-11-23
+
+Migration 20261123161900_authoritative_internal_transfer_and_escrow_fee_receipts is applied and source-controlled locally. It seeds defaults only when absent: platform_fee_percent=1.5, escrow_fee_percent=1.5, min_trade_amount=10. The canonical execute_internal_transfer RPC now uses an empty search_path and is callable only by service_role; the legacy execute_wallet_transfer routine is revoked from all API roles. The new transfer contract credits the entered requested amount to the recipient and debits amount plus fee from the sender, writes paired user-ledger entries and a platform_fee_collected entry, and returns the exact fee rate captured by the DB transaction for new transfers and idempotent replays.
+
+The initiate_trade_with_escrow RPC uses app_settings.escrow_fee_percent, and the current actor binding, empty search_path, and SELL reservation interlock remain intact. Live verification observed zero customer wallets, transfers, transfer ledger entries, trades or escrow rows; no funds were moved. 53 local contract/unit tests pass, but actual integration with user accounts/wallet rows remains unverified.

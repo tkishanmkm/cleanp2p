@@ -20,6 +20,7 @@ const validResponse = {
   gross_amount: 100,
   net_amount: 100,
   fee_amount: 1.5,
+  fee_rate: 0.015,
   total_deduction: 101.5,
   sender_balance_after: 898.5,
   recipient_balance_after: 100,
@@ -30,6 +31,12 @@ const validResponse = {
 
 test("accepts a well-formed successful RPC response matching the request", () => {
   assert.equal(isValidTransferRpcResponse(validResponse, expected), true);
+});
+
+test("requires the database fee-rate snapshot for new transfers", () => {
+  assert.equal(isValidTransferRpcResponse({ ...validResponse, fee_rate: undefined }, expected), false);
+  assert.equal(isValidTransferRpcResponse({ ...validResponse, fee_rate: 0.02 }, expected), false);
+  assert.equal(isValidTransferRpcResponse({ ...validResponse, fee_rate: "0.015" }, expected), true);
 });
 
 test("accepts old fee semantics only for an exact idempotent replay", () => {
