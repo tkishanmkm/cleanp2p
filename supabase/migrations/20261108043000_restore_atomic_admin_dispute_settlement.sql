@@ -33,6 +33,36 @@ BEGIN
 END;
 $precheck$;
 
+DO $system_events_precheck$
+BEGIN
+    IF pg_catalog.to_regclass('public.trade_system_events') IS NULL THEN
+        RAISE EXCEPTION 'Out-of-Realtime trade system event table is required before admin dispute settlement.';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        WHERE c.oid='public.trade_system_events'::regclass
+          AND c.relrowsecurity IS TRUE
+          AND c.relforcerowsecurity IS FALSE
+    ) THEN
+        RAISE EXCEPTION 'trade_system_events must keep RLS enabled and non-forced for its postgres-owned writer.';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_publication_tables
+        WHERE pubname='supabase_realtime'
+          AND schemaname='public'
+          AND tablename='trade_system_events'
+    ) THEN
+        RAISE EXCEPTION 'Automated dispute events must remain outside Supabase Realtime.';
+    END IF;
+    IF pg_catalog.has_table_privilege('anon','public.trade_system_events','INSERT')
+       OR pg_catalog.has_table_privilege('authenticated','public.trade_system_events','INSERT')
+       OR pg_catalog.has_table_privilege('anon','public.trade_system_events','SELECT')
+       OR pg_catalog.has_table_privilege('authenticated','public.trade_system_events','SELECT') THEN
+        RAISE EXCEPTION 'trade_system_events must remain inaccessible to browser API roles.';
+    END IF;
+END;
+$system_events_precheck$;
+
 ALTER FUNCTION public.resolve_trade_dispute(UUID, TEXT, UUID, UUID)
     SET search_path = '';
 CREATE OR REPLACE FUNCTION public.admin_resolve_trade_dispute_atomic(
@@ -283,19 +313,30 @@ BEGIN
         NOW()
     );
 
-    -- Chat and notifications are ancillary. They must not undo a verified
-    -- escrow settlement if their optional insert path is temporarily unavailable.
+    -- Automated dispute settlement messages use trade_system_events, which
+    -- is explicitly outside the Supabase Realtime publication.
+    -- This ancillary insert must not undo a verified escrow settlement.
     BEGIN
-        INSERT INTO public.trade_messages (
-            trade_id, sender_id, sender_username, message, is_moderator, created_at
+        INSERT INTO public.trade_system_events (
+            trade_id, sender_id, sender_username, type, message, metadata, dedupe_key, created_at
         ) VALUES (
-            p_trade_id::TEXT,
+            p_trade_id,
             '00000000-0000-0000-0000-000000000000',
             'Paxones System',
-            'Dispute resolved. Escrow awarded to the ' || LOWER(v_winner_role) || '.',
-            TRUE,
+            CASE WHEN v_winner_role = 'BUYER' THEN 'TRADE_RELEASED' ELSE 'TRADE_CANCELLED' END,
+            'Dispute resolved by an administrator. Escrow awarded to the ' || LOWER(v_winner_role) || '.',
+            JSONB_BUILD_OBJECT(
+                'dispute_id', p_dispute_id,
+                'trade_id', p_trade_id,
+                'winner_id', p_winner_id,
+                'winner_role', v_winner_role,
+                'resolution', v_resolution,
+                'actor_id', p_actor_id
+            ),
+            'admin-dispute-resolution:' || p_dispute_id::TEXT,
             NOW()
-        );
+        )
+        ON CONFLICT (trade_id, dedupe_key) DO NOTHING;
         v_message_written := TRUE;
     EXCEPTION WHEN OTHERS THEN
         v_message_written := FALSE;
