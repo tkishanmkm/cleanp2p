@@ -1,7 +1,3 @@
--- Hardening of the atomic BUY-ad creation transaction.
--- The owner profile lock serializes concurrent creations; the hard cap counts
--- logical active listings across ads and p2p_ads and fails closed for non-active accounts.
--- No existing listing, wallet, balance, or inventory row is modified.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.create_buy_ad_atomic(

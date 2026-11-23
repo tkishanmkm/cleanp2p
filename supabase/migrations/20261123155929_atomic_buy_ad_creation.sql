@@ -1,6 +1,3 @@
--- Create BUY advertisements in both marketplace representations atomically.
--- SELL remains disabled until a corresponding inventory reservation/consumption/
--- release state machine is implemented end-to-end.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.create_buy_ad_atomic(

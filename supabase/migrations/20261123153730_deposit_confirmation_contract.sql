@@ -1,8 +1,3 @@
--- Paxones canonical multi-chain pending-deposit and confirmation contract.
--- The leased wrapper performs the only scanner credit path and persists the
--- independently verified block inclusion identity in the same DB transaction.
--- Run only after reconciling the local migration history with paxonesflows.
-
 BEGIN;
 
 ALTER TABLE public.onchain_deposits

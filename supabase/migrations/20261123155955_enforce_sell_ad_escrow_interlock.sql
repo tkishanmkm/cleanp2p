@@ -1,5 +1,3 @@
--- Enforce the SELL inventory interlock inside the exposed SECURITY DEFINER
--- escrow RPC. API/UI restrictions alone do not protect a directly invoked RPC.
 BEGIN;
 
 DO $migration$

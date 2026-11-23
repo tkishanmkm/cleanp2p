@@ -395,3 +395,14 @@ Inventory only; this list records the 90 tracked local SQL files with versions g
 20261108190000_empty_profile_trigger_search_paths.sql
 20261108200000_empty_wallet_provisioning_search_path.sql
 ```
+
+
+## Current deployment state — 2026-11-23
+
+The historical migration inventory above is a prior candidate inventory, not an instruction to replay it. Supabase paxonesflow now records 151 applied versions. Every applied version has a matching SQL source file under supabase/migrations in the cleanp2p main branch. There are 293 local SQL files whose versions are not recorded as applied. Do not run a blanket database push: reconcile each intervening version against the live schema and dependent RPC signatures first.
+
+The current deposit-specific applied versions are 20261123153730, 20261123153743, 20261123153824, 20261123154441 and 20261123154456. They install pending registration, address-owner resolution, confirmation leases, block identity, chain-integrity monitor, terminal replay protection and raw-credit ACL restriction. Scanner registration does not credit a balance. Only the lease-checked confirmation wrapper may call the raw credit primitive, which is now postgres-only.
+
+The marketplace versions 20261123155908, 20261123155929, 20261123155955 and 20261123160000 install client DML lockdown, atomic BUY-ad creation, SELL escrow interlock and ten-active-ad limit. BUY creation remains fail-closed while crypto_market_prices has no quote newer than ten minutes. SELL remains blocked until atomic per-ad inventory reservation and restore is implemented.
+
+The current live project is empty of Auth users, profiles, wallets, ads and on-chain deposit records; four active deposit_addresses records refer to a missing Auth owner and are deliberately skipped. No signer/broadcast/credit operation was performed. The standalone worker is configured fail-closed and all feature flags are off. Do not use the historical order above to enable financial workers.

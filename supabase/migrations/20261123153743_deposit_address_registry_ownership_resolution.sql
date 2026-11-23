@@ -1,6 +1,3 @@
--- Standalone deposit ingress + owner-resolution compatibility candidate.
--- Recreates the pending-only registration RPC absent in production and patches the canonical credit RPC.
--- Candidate only: schema-backed validation required before deployment.
 BEGIN;
 
 -- Pending-only deposit registration. This function must never mutate wallet balances or ledger entries.
@@ -51,7 +48,7 @@ BEGIN
 
     CASE v_network
       WHEN 'BTC' THEN v_expected_asset := 'BTC'; v_required := 3; v_expected_contract := NULL;
-      WHEN 'LTC' THEN v_expected_asset := 'LTC'; v_required := 12; v_expected_contract := NULL;
+      WHEN 'LTC' THEN v_expected_asset := 'LTC'; v_required := 6; v_expected_contract := NULL;
       WHEN 'ETH' THEN v_expected_asset := 'ETH'; v_required := 12; v_expected_contract := NULL;
       WHEN 'ERC20' THEN v_expected_asset := 'USDT'; v_required := 12; v_expected_contract := '0xdac17f958d2ee523a2206206994597c13d831ec7';
       WHEN 'BEP20' THEN v_expected_asset := 'USDT'; v_required := 15; v_expected_contract := '0x55d398326f99059ff775485246999027b3197955';

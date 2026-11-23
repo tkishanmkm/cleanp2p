@@ -11,6 +11,7 @@ import { runDepositChainIntegrityMonitor } from './jobs/depositIntegrityWorker';
 import { runMarketPriceUpdate } from './jobs/priceUpdaterWorker';
 import { reconcileLedgerVsChain } from './jobs/reconciliationWorker';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from './lib/blockchain/providers';
+import { hasAnyWorkerFeatureEnabled, resolveWorkerFeatureFlags, type WorkerFeatureFlags } from './jobs/worker-config';
 
 console.log('====================================================');
 console.log('  Wayones CRYPTO & ESCROW BACKGROUND WORKER DAEMON  ');
@@ -34,212 +35,202 @@ const state: WorkerState = {
   startedAt: new Date().toISOString(),
 };
 
-/**
- * 1. Initialize and verify Database Connection Pools & Supabase
- */
-async function initializeDatabaseConnection(): Promise<boolean> {
-  console.log('[Database] Initializing connection pool & database client...');
-  try {
-    const startTime = Date.now();
-    const { error } = await supabaseAdmin.from('profiles').select('id').limit(1);
-    const latency = Date.now() - startTime;
+const scheduledTasks: Array<{ stop: () => void }> = [];
 
+async function initializeDatabaseConnection(): Promise<boolean> {
+  console.log('[Database] Initializing connection pool & Supabase...');
+  try {
+    const startedAt = Date.now();
+    const { error } = await supabaseAdmin.from('profiles').select('id').limit(1);
+    const latency = Date.now() - startedAt;
     if (error) {
       state.isDatabaseConnected = false;
       throw new Error(`Database readiness check failed (${latency}ms, code=${error.code || 'unknown'}): ${error.message}`);
     }
-
     state.isDatabaseConnected = true;
-    console.log(`[Database] PostgreSQL database pool ready & authenticated (${latency}ms latency).`);
+    console.log(`[Database] Authenticated database connection ready (${latency}ms).`);
     return true;
-  } catch (err: any) {
-    console.error('[Database] Failed to connect to database pool:', err.message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Database] Worker startup check failed:', message);
     state.isDatabaseConnected = false;
     return false;
   }
 }
 
-/**
- * 2. Initialize Blockchain Providers & Network Listeners
- */
-async function initializeBlockchainListeners(): Promise<void> {
-  console.log('[Blockchain] Initializing RPC providers and chain event listeners...');
-
-  for (const [netCode, config] of Object.entries(SUPPORTED_EVM_CHAINS)) {
-    try {
-      const provider = getEvmProvider(netCode);
-      const blockNumber = await provider.getBlockNumber();
-      state.activeEVMListeners.push(netCode);
-      console.log(`[Blockchain: ${netCode}] Connected to ${config.name}. Current block: #${blockNumber}`);
-    } catch (err: any) {
-      console.warn(`[Blockchain: ${netCode}] RPC connection notice: ${err?.message || err}`);
+async function initializeBlockchainListeners(features: WorkerFeatureFlags): Promise<void> {
+  const needsEvmProviders = features.depositIngestion || features.depositConfirmations;
+  if (needsEvmProviders) {
+    console.log('[Blockchain] Checking EVM providers required by explicitly enabled workers...');
+    for (const [networkCode, config] of Object.entries(SUPPORTED_EVM_CHAINS)) {
+      try {
+        const provider = getEvmProvider(networkCode);
+        const blockNumber = await provider.getBlockNumber();
+        state.activeEVMListeners.push(networkCode);
+        console.log(`[Blockchain: ${networkCode}] Connected to ${config.name}. Current block: #${blockNumber}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[Blockchain: ${networkCode}] Provider unavailable:`, message);
+      }
     }
   }
 
-  console.log('[Workers] Bootstrapping transaction ingestion, confirmation, and withdrawal daemons...');
-
-  try {
+  if (features.depositIngestion) {
     startDepositIngestionWorker(30000);
     state.depositWorkerRunning = true;
-    console.log('[Workers] Deposit Ingestion Worker active (interval: 30s).');
-  } catch (err: any) {
-    console.error('[Workers] Deposit Ingestion Worker error:', err.message);
+    console.log('[Workers] Deposit ingestion enabled (30-second poll).');
+  } else {
+    console.log('[Workers] Deposit ingestion remains disabled.');
   }
 
-  try {
+  if (features.depositConfirmations) {
     startConfirmationsWorker(30000);
     state.confirmationsWorkerRunning = true;
-    console.log('[Workers] Confirmations Verification Worker active (interval: 30s).');
-  } catch (err: any) {
-    console.error('[Workers] Confirmations Worker error:', err.message);
+    console.log('[Workers] Deposit confirmation enabled (30-second poll).');
+  } else {
+    console.log('[Workers] Deposit confirmation remains disabled.');
   }
 
-  try {
+  if (features.withdrawal) {
     startWithdrawalWorker(15000);
     state.withdrawalWorkerRunning = true;
-    console.log('[Workers] Automated Withdrawal Queue Worker active (interval: 15s).');
-  } catch (err: any) {
-    console.error('[Workers] Withdrawal Worker error:', err.message);
+    console.log('[Workers] Withdrawal dispatch/settlement enabled by both explicit approval flags.');
+  } else {
+    console.log('[Workers] Withdrawal dispatch/settlement remains disabled; enable, broadcast and settlement gates are all required.');
   }
 }
 
-/**
- * 3. Schedule Recurring Maintenance Jobs & Cron Daemons
- */
-function initializeScheduledJobs(): void {
-  console.log('[Cron] Initializing scheduled cron daemons...');
+function scheduleJob(
+  enabled: boolean,
+  name: string,
+  expression: string,
+  action: () => Promise<void> | void,
+): void {
+  if (!enabled) {
+    console.log(`[Cron] ${name} disabled; no schedule registered.`);
+    return;
+  }
 
-  // 1. Hot Wallet Balance & Reserve Monitor: every 15 minutes
-  cron.schedule('*/15 * * * *', async () => {
+  scheduledTasks.push(cron.schedule(expression, async () => {
     try {
-      console.log('[Cron: Hot Wallet] Auditing hot wallet balances...');
-      await checkHotWalletBalance('USDT');
-    } catch (err: any) {
-      console.error('[Cron: Hot Wallet Error]:', err.message);
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Cron: ${name}] Job failed:`, message);
     }
+  }));
+  console.log(`[Cron] ${name} scheduled: ${expression}`);
+}
+
+function initializeScheduledJobs(features: WorkerFeatureFlags): void {
+  scheduleJob(features.hotWalletMonitor, 'Hot wallet monitor', '*/15 * * * *', async () => {
+    await checkHotWalletBalance('USDT');
   });
 
-  // 2. P2P Expiry Daemon: auto-cancellation & escrow refund every minute
-  cron.schedule('* * * * *', async () => {
-    try {
-      await processExpiredP2PTrades();
-    } catch (err: any) {
-      console.error('[Cron: P2P Expiry Error]:', err?.message);
-    }
+  scheduleJob(features.p2pExpiry, 'P2P expiry and settlement', '* * * * *', async () => {
+    const result = await processExpiredP2PTrades();
+    if (!result.success) throw new Error(result.error || 'P2P expiry RPC rejected the request');
   });
 
-  // 3. Auto-sweep confirmed user balances to Hot Wallet every 5 minutes
-  cron.schedule('*/5 * * * *', async () => {
-    try {
-      const sweepRes = await runDepositSweeper();
-      const sweptCount = sweepRes.filter((r) => r.status === 'SUCCESS').length;
-      console.log('[Cron: Auto-Sweeper]', new Date().toISOString(), `Swept: ${sweptCount}/${sweepRes.length}`);
-    } catch (err: any) {
-      console.error('[Cron: Auto-Sweeper Error]:', err?.message);
-    }
+  scheduleJob(features.depositSweeper, 'Deposit sweeper', '*/5 * * * *', async () => {
+    const results = await runDepositSweeper();
+    const successCount = results.filter((result) => result.status === 'SUCCESS').length;
+    console.log(`[Cron: Deposit sweeper] Completed ${successCount}/${results.length} sweep result(s).`);
   });
 
-  // 4. Market Price Updater: fetch live crypto/fiat rates and update DB every 5 minutes
-  cron.schedule('*/5 * * * *', async () => {
-    try {
-      console.log('[Cron: Market Prices] Updating live crypto/fiat market prices...');
-      const res = await runMarketPriceUpdate();
-      if (res.success) {
-        console.log('[Cron: Market Prices]', new Date().toISOString(), `Updated ${res.records_updated} price pairs across ${res.live_crypto_assets} assets and ${res.total_fiats} fiats.`);
-      } else {
-        console.warn('[Cron: Market Prices Notice]:', res.error);
-      }
-    } catch (err: any) {
-      console.error('[Cron: Market Prices Error]:', err?.message);
-    }
+  scheduleJob(features.marketPrices, 'Market price updater', '*/5 * * * *', async () => {
+    const result = await runMarketPriceUpdate();
+    if (!result.success) throw new Error(result.error || 'Market price update was unsuccessful');
+    console.log(`[Cron: Market prices] Updated ${result.records_updated} record(s).`);
   });
 
-  // 5. System Reconciliation: ledger vs on-chain reserve audit every 15 minutes
-  cron.schedule('*/15 * * * *', async () => {
-    try {
-      console.log('[Cron: Reconciliation] Auditing ledger vs on-chain balances...');
-      const report = await reconcileLedgerVsChain('USDT');
-      console.log('[Cron: Reconciliation]', new Date().toISOString(), `Balanced: ${report.isBalanced}, Liability: ${report.totalDbLiability.toFixed(2)} USDT, On-Chain: ${report.onChainHotWalletBalance.toFixed(2)} USDT, Discrepancy: ${report.discrepancy.toFixed(2)} USDT.`);
-    } catch (err: any) {
-      console.error('[Cron: Reconciliation Error]:', err?.message);
-    }
-  });
-
-  // 6. Post-credit deposit chain integrity monitor: canonical block identity checks.
-  // This creates durable alerts for hash divergence only; it never reverses customer balances.
-  cron.schedule('*/5 * * * *', async () => {
-    try {
-      await runDepositChainIntegrityMonitor();
-    } catch (err: any) {
-      console.error('[Cron: Deposit Integrity Error]:', err?.message);
-    }
-  });
-
-  // 7. Worker Health Heartbeat: every 5 minutes
-  cron.schedule('*/5 * * * *', () => {
-    const memory = process.memoryUsage();
-    console.log('[Worker Heartbeat]', {
-      timestamp: new Date().toISOString(),
-      uptimeSeconds: Math.floor(process.uptime()),
-      dbConnected: state.isDatabaseConnected,
-      activeEVM: state.activeEVMListeners,
-      rssMemoryMb: Math.round(memory.rss / (1024 * 1024)),
-      heapUsedMb: Math.round(memory.heapUsed / (1024 * 1024)),
+  scheduleJob(features.ledgerReconciliation, 'Ledger reconciliation', '*/15 * * * *', async () => {
+    const report = await reconcileLedgerVsChain('USDT');
+    console.log('[Cron: Ledger reconciliation]', {
+      balanced: report.isBalanced,
+      discrepancy: report.discrepancy,
     });
   });
 
-  console.log('[Cron] All scheduled cron daemons active.');
-}
+  scheduleJob(features.depositIntegrityMonitor, 'Deposit chain integrity monitor', '*/5 * * * *', async () => {
+    const report = await runDepositChainIntegrityMonitor();
+    console.log('[Cron: Deposit integrity]', report);
+  });
 
-/**
- * 4. Graceful Shutdown Handler
- */
-function handleGracefulShutdown(signal: string): void {
-  console.log(`\n[Worker] Received ${signal}. Initiating graceful shutdown...`);
-
-  try {
-    stopDepositIngestionWorker();
-    stopConfirmationsWorker();
-    stopWithdrawalWorker();
-    console.log('[Worker] All background worker loops stopped cleanly.');
-  } catch (err: any) {
-    console.error('[Worker] Error during worker loop termination:', err.message);
+  if (hasAnyWorkerFeatureEnabled(features)) {
+    scheduledTasks.push(cron.schedule('*/5 * * * *', () => {
+      const memory = process.memoryUsage();
+      console.log('[Worker Heartbeat]', {
+        timestamp: new Date().toISOString(),
+        uptimeSeconds: Math.floor(process.uptime()),
+        dbConnected: state.isDatabaseConnected,
+        activeEVMProviders: state.activeEVMListeners,
+        depositIngestion: state.depositWorkerRunning,
+        depositConfirmations: state.confirmationsWorkerRunning,
+        withdrawals: state.withdrawalWorkerRunning,
+        rssMemoryMb: Math.round(memory.rss / (1024 * 1024)),
+        heapUsedMb: Math.round(memory.heapUsed / (1024 * 1024)),
+      });
+    }));
   }
 
-  console.log('[Worker] Shutdown complete. Exiting process.');
+  if (scheduledTasks.length === 0) {
+    console.log('[Cron] No recurring jobs are active.');
+  }
+}
+
+function stopScheduledJobs(): void {
+  for (const task of scheduledTasks.splice(0)) {
+    try {
+      task.stop();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[Cron] Could not stop a scheduled job cleanly:', message);
+    }
+  }
+}
+
+function handleGracefulShutdown(signal: string): void {
+  console.log(`\n[Worker] Received ${signal}. Initiating graceful shutdown...`);
+  stopScheduledJobs();
+  if (state.depositWorkerRunning) stopDepositIngestionWorker();
+  if (state.confirmationsWorkerRunning) stopConfirmationsWorker();
+  if (state.withdrawalWorkerRunning) stopWithdrawalWorker();
+  console.log('[Worker] Enabled background loops and schedules stopped.');
   process.exit(0);
 }
 
-/**
- * Main Worker Entry Point
- */
 export async function startWorkerDaemon(): Promise<void> {
-  console.log('[Worker] Starting Wayones Background Daemon...');
-  const databaseReady = await initializeDatabaseConnection();
-  if (!databaseReady) {
-    throw new Error('WORKER_STARTUP_ABORTED_DATABASE_NOT_READY');
+  console.log('[Worker] Starting Wayones background daemon...');
+  const features = resolveWorkerFeatureFlags(process.env);
+  console.log('[Worker] Explicit feature gate snapshot:', features);
+
+  if (!hasAnyWorkerFeatureEnabled(features)) {
+    console.warn('[Worker] No worker feature is explicitly enabled. Exiting without connecting to chains or starting jobs.');
+    return;
   }
-  await initializeBlockchainListeners();
-  initializeScheduledJobs();
-  console.log('[Worker] All systems initialized and listening.');
+
+  const databaseReady = await initializeDatabaseConnection();
+  if (!databaseReady) throw new Error('WORKER_STARTUP_ABORTED_DATABASE_NOT_READY');
+
+  await initializeBlockchainListeners(features);
+  initializeScheduledJobs(features);
+  console.log('[Worker] Enabled features initialized. Disabled features remain stopped.');
 }
 
-// Only auto-run if explicitly executed via standalone CLI flag or direct node execution with explicit flag
+// The standalone flag only selects the daemon entrypoint. Individual feature
+// flags (and separate financial approval flags) are still required for work.
 if (typeof require !== 'undefined' && require.main === module && process.env.RUN_STANDALONE_WORKER === 'true') {
   process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
-
   process.on('unhandledRejection', (reason) => {
     console.error('[Worker Unhandled Rejection]:', reason);
   });
-
   process.on('uncaughtException', (error) => {
     console.error('[Worker Uncaught Exception]:', error);
   });
-
-  startWorkerDaemon().catch((err) => {
-    console.error('[Worker Fatal Startup Error]:', err);
+  startWorkerDaemon().catch((error) => {
+    console.error('[Worker Fatal Startup Error]:', error);
     process.exitCode = 1;
   });
 }
-

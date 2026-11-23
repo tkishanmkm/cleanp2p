@@ -11,7 +11,7 @@
     "emergency:halt": "ts-node scripts/kill-switch.ts halt",
     "emergency:resume": "ts-node scripts/kill-switch.ts resume",
     "workers:start": "node -e \"process.env.RUN_STANDALONE_WORKER='true'; require('./dist/worker.js')\"",
-    "build:worker": "esbuild src/worker.ts --bundle --platform=node --format=cjs --packages=external --alias:@=./src --outfile=dist/worker.js",
+    "build:worker": "esbuild src/worker.ts --bundle --platform=node --format=cjs --packages=external --alias:@=./src --alias:server-only=./scripts/server-only-shim.ts --outfile=dist/worker.js",
     "start:worker": "node -e \"process.env.RUN_STANDALONE_WORKER='true'; require('./dist/worker.js')\"",
     "test:p2p": "tsx tests/p2p-trade-flow.test.ts",
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",

@@ -567,3 +567,14 @@ The new supabase/tests/signed_sweep_intent_contract_preflight.sql covers the gap
 The current worker release is not compatible with the live sweep catalog yet. Keep sweep and EVM gas-funding workers paused until the complete ordered migration inventory is reconciled, the new signed-intent preflight and all existing nonce/lease/status preflights pass, and the matching worker code is deployed. The current RPC mismatch fails closed before the normal signed-transaction broadcast step, but it will prevent sweeping/gas funding from completing. Do not bypass the missing contracts with direct table writes, old persistence overloads or generic nonce allocation.
 
 No migration from this section was applied to production. The production decision remains NO-GO pending full historical migration reconciliation, the ordered migration release and the complete 33-preflight gate.
+
+
+## Superseding execution evidence — 2026-11-23
+
+This document's earlier catalog snapshot is historical. The current connected project is paxonesflow (eaiwgfxoiwxepinvcykg). Its migration ledger now contains 151 applied versions. Exact SQL sources have been restored to main for all remote-applied versions; 293 local migration files remain not recorded as applied. These pending local versions include historical schema/bootstrap and later release-chain migrations and must not be bulk-applied or mass-repaired without ordered schema and function preflight.
+
+Newly applied deposit protections (versions 20261123153730 through 20261123154456) add owner-resolved pending registration, lease-bound confirmation/credit, canonical block identity, an alert-only integrity monitor, replay checks and a postgres-only raw credit primitive. New marketplace migrations (versions 20261123155908 through 20261123160000) remove direct client DML, add authenticated atomic BUY-ad creation and a ten-active-ad cap, and block SELL escrow until per-ad inventory reservation/restore exists.
+
+The Supabase project has no user/profile/wallet/deposit/ad/trade/ledger rows. Four active deposit-address registry rows reference a missing Auth user and remain unassigned. The market-price cache is stale (latest observed update 2026-10-01; none within ten minutes), so the new BUY RPC correctly refuses creation until live prices refresh. No customer funds or balances were modified.
+
+The current Windows checkout has no Supabase URL/service-role variables or local environment file, so a one-off live market-price refresh and local production-database integration test were not attempted. Render Free has no background-worker/cron compute; Supabase pg_cron has no active scheduled financial jobs and Vault has no secrets. The worker daemon is now default-off with separate approval flags for deposit credits, withdrawal broadcast/settlement, sweeps and P2P settlement. All flags remain off.

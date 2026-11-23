@@ -1,7 +1,3 @@
--- Keep ledger-backed deposits finalized when scanners replay zero-confirmation candidates.
--- A valid existing ledger entry is an idempotent ALREADY_CREDITED response.
--- A terminal tracking row without its ledger fails closed for reconciliation.
--- This function-body patch changes no wallet, deposit, or ledger rows by itself.
 BEGIN;
 
 DO $migration$

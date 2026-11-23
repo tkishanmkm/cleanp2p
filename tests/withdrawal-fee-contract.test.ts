@@ -48,4 +48,4 @@ assert.match(migration, /SET is_restricted = true, status = ''restricted''/);
 assert.match(migration, /SET search_path =/);
 
 console.log("PASS: withdrawal minimum, price freshness, single 2x multiplier, sweep minimum, and hot-wallet fail-closed contracts");
-console.log("NOTE: these are static checks; production RPC migration remains unapplied pending migration-chain reconciliation.");
+console.log("NOTE: these are static checks only; withdrawal signer, dispatch, receipt and reconciliation release gates remain separate.");

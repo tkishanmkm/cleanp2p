@@ -1,7 +1,3 @@
--- The canonical financial credit function is an internal primitive.
--- Server-facing deposit ingestion must use register_pending_deposit; confirmed
--- credit must use process_deposit_atomic_with_lease. Revoking direct service_role
--- execution makes the database lease boundary enforceable by the RPC ACL.
 BEGIN;
 
 DO $migration$

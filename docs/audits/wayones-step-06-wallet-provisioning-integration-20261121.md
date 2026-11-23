@@ -318,3 +318,12 @@ The connected migration ledger instead contains remote-only versions `2026111907
 The admin endpoint already fails closed with HTTP 503 and code `WALLET_INDEX_ALLOCATOR_NOT_INSTALLED`; it has no client-side or MAX-index fallback. The current connected snapshot has zero profile rows, so there are no missing profile indexes to repair in this snapshot. No attempt was made to call `claim_next_wallet_index()` directly from the route because a sequence allocation separated from the profile update would not be atomic and could waste indexes under concurrent calls.
 
 The auth signup trigger independently assigns new profile wallet indexes from the same canonical sequence. The application must not insert profiles or synthesize wallet indexes to work around the missing repair RPC.
+
+
+## Latest continuation — 2026-11-23
+
+The connected Supabase project currently has zero Auth users and zero profiles. Four active deposit_addresses records point to a missing Auth owner; the deposit scanners correctly skip these records because the profile and positive wallet index cannot be verified. Do not recreate the owner, assign those addresses to another account, or fabricate a wallet index. Signup/profile creation and sequence allocation still require isolated validation with a test Auth user.
+
+The applied source-ledger files missing from main have now been restored. The current profile/wallet-index repair function assign_missing_profile_wallet_indexes() remains absent; the admin endpoint continues to fail closed. No profile was updated and no sequence was consumed for a fabricated customer.
+
+The 20261119174139 step_06_unify_wallet_index_allocator migration is now represented in main using the exact applied Supabase version. This records the deployed allocator contract but does not certify BTC/ETH/LTC/TRON derivation vectors, xpub ancestor-path ceremony, customer wallet provisioning or deposit ownership. Step 06 remains IN PROGRESS and wallet launch remains NO-GO pending those validations.

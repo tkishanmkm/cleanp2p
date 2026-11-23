@@ -1,6 +1,3 @@
--- Restrict marketplace row writes to the verified server RPC/API layer.
--- Public/owner reads remain available; clients cannot directly insert, mutate,
--- truncate, or attach triggers to canonical marketplace records.
 BEGIN;
 
 ALTER TABLE public.ads ENABLE ROW LEVEL SECURITY;

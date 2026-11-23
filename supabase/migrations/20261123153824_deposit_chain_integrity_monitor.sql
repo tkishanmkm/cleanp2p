@@ -1,6 +1,3 @@
--- Post-credit canonical block identity monitoring.
--- This migration records integrity evidence and raises alerts only. It never
--- changes deposits, ledger entries, wallet balances, withdrawals, or transfers.
 BEGIN;
 
 ALTER TABLE public.onchain_deposits

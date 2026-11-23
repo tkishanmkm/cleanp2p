@@ -1,9 +1,9 @@
 # WAYONES 100-Step Wallet and Financial-System Plan
 
 Repository: tkishanmkm/cleanp2p only
-Branch: fix/step-06-wallet-provisioning-integration
-Plan date: 2026-11-22
-Execution policy: local code and SQL review first; no production writes, live transactions, deployment, commit or push unless separately authorized.
+Branch: main
+Plan date: 2026-11-22; execution update: 2026-11-23
+Execution policy: full user authorization received for scoped `tkishanmkm/cleanp2p` `main` pushes and reviewed additive Supabase migrations to `paxonesflows`. No unrelated repositories, paid upgrades, GitHub Actions runs, live financial transactions, wallet credits, signing/broadcasting, production-secret changes or financial-worker activation without a separate validated release gate.
 
 ## One-hour priority sprint
 
@@ -33,7 +33,7 @@ No production migration, live transaction, secret change or deployment is part o
 6. [x] Inspect Supabase projects and capture the connected paxonesflows schema and migration snapshot read-only.
 7. [ ] Confirm authoritatively which Supabase project is production and which is staging.
 8. [ ] Reconcile every local migration version against the remote migration ledger.
-9. [ ] Recover source copies of applied remote migrations missing from the local repository.
+9. [x] Recover source copies of applied remote migrations missing from the local repository (restored the three previously missing applied files from the Supabase ledger; current remote applied versions now all have local source files).
 10. [ ] Confirm Render service, deployed branch, domain mapping, environment and service state.
 
 ### B. Wallet index, signup and provisioning (11-20)
@@ -66,10 +66,10 @@ No production migration, live transaction, secret change or deployment is part o
 
 31. [ ] Confirm every supported asset/network resolves to one canonical deposit address.
 32. [ ] Reconcile wallets, user_deposit_addresses and legacy deposit_addresses identities.
-33. [ ] Reject orphan registry addresses and rows whose profile/index owner cannot be confirmed.
+33. [x] Reject orphan registry addresses and rows whose profile/index owner cannot be confirmed (ingestion fails closed; four existing active registry rows have no Auth/profile owner and are skipped, not reassigned).
 34. [ ] Validate chain, asset, token contract, destination and transaction identity in every webhook.
-35. [ ] Make pending-deposit registration idempotent across provider retries and duplicate webhooks.
-36. [ ] Align local RPC arguments and response parsing with installed SQL signatures.
+35. [x] Make pending-deposit registration idempotent across provider retries and duplicate webhooks (exact transaction/network/output identity, existing-row mismatch checks, terminal replay guard).
+36. [x] Align local RPC arguments and response parsing with installed SQL signatures (pending registration and leased confirmation/credit RPCs matched to worker callsites).
 37. [ ] Prevent rejected or malformed RPC responses from being reported as successful registrations.
 38. [ ] Enforce chain-specific minimums, amount precision and asset/contract allow-lists.
 39. [ ] Ensure deposit history uses canonical records, stable pagination and realtime updates.
@@ -77,8 +77,8 @@ No production migration, live transaction, secret change or deployment is part o
 
 ### E. Confirmation, balances and ledger integrity (41-50)
 
-41. [ ] Reconcile deposit confirmation RPCs and worker lease columns.
-42. [ ] Require canonical block identity and configured confirmation depth before credit.
+41. [x] Reconcile deposit confirmation RPCs and worker lease columns (claim/release/leased-credit RPCs installed; service-role-only grants verified).
+42. [x] Require canonical block identity and configured confirmation depth before credit (block-hash identity persisted with a lease-bound credit wrapper and chain-confirmation threshold gate).
 43. [ ] Verify exact token Transfer events before crediting token deposits.
 44. [ ] Ensure one confirmed chain event can credit at most one ledger reference.
 45. [ ] Make ledger credit and wallet balance updates atomic in one database transaction.
@@ -167,3 +167,31 @@ No production migration, live transaction, secret change or deployment is part o
 ## Completion rule
 
 A step is complete only when its specific change is reviewed and the required evidence exists. A local migration file does not prove it was applied. A passing local quality gate does not prove production financial safety. Unresolved environment, schema, secret, approval or chain-finality blockers remain open.
+
+
+## Current execution evidence and blockers (2026-11-23)
+
+- Active worktree is the clean `main` checkout at `C:\Users\theki\cleanp2p-wayones-work`; only `tkishanmkm/cleanp2p` is in scope. The separate `waydeepak` project and all PNB/BOB/Fino repositories remain untouched.
+- Phase 1 application repair commit `119055284437abb3a13c7d3d755c6336290f292a` is live on Render `wayones`. Later SQL-source/documentation commits are marked `[skip render]` and do not change the deployed runtime.
+- Eleven Supabase migrations were installed and verified on `paxonesflow`: `20261123141916` trade system events outside Realtime; `20261123141921` secure Didit initiation; `20261123153730` deposit confirmation/leases; `20261123153743` three-registry deposit owner resolution; `20261123153824` deposit chain-integrity monitor; `20261123154441` terminal deposit replay/balance guard; `20261123154456` raw-credit ACL revocation; `20261123155908` marketplace RLS/DML lockdown; `20261123155929` atomic BUY-ad creation; `20261123155955` escrow SELL interlock; and `20261123160000` ten-active-ad hardening.
+- The raw `process_deposit_atomic` primitive is now executable only by `postgres`; the server-side pending registration, confirmation claim/release, leased credit and integrity functions retain `service_role` access. The raw credit RPC has no application callsites.
+- The combined deposit, B2, withdrawal, marketplace and worker-config contract suite passes **42/42**; TypeScript and standalone worker bundle build pass; the current Next.js production build compiled and generated all 34 static pages (existing ESLint warning backlog remains). These are local/static tests, not live-money integration tests.
+- Migration history (latest snapshot): 151 remote applied versions, 444 local SQL files, no remote-applied version missing from `main` source, but **293 local migration files remain unrecorded as applied**. Do not run blanket `supabase db push` or mass-repair migration history without per-migration schema proof.
+- The live project currently has zero `auth.users` rows, zero profiles, zero wallets and zero on-chain deposits/credits. Four active `deposit_addresses` rows belong to a non-existent Auth owner; the scanner correctly skips them. Do not transfer or recreate that owner. New signup and wallet provisioning still require an isolated registration/allocator validation.
+- The service-role address scanner currently has no verified active customer owner to process. No deposit, withdrawal, sweep, internal transfer, escrow settlement, signing, broadcast or balance-credit test has been run.
+- Render currently has the `wayones` Free web service but no separately deployed background-worker service; `pg_cron` is present but not yet configured for the financial jobs. Do not claim 24/7 deposit/withdrawal processing until a supported free-tier scheduler/worker design is implemented and monitored.
+- Didit secure initiation is installed, but the connected Didit organization has zero available credit and its historical monthly free-check allowance is not available. No billable session was created. KYC vendor end-to-end execution remains blocked pending an actually funded/eligible workflow decision.
+- Step 06 remains IN PROGRESS. HD vectors, wallet owner/index schema, real user provisioning, all withdrawal/gas-funding/sweep/UTXO/transfer/escrow paths, RLS/function review, isolated staging tests and final release remain open.
+
+## Latest execution update (2026-11-23, marketplace and worker safety)
+
+- Marketplace DML migration 20261123155908 is applied: anon/authenticated keep RLS-filtered SELECT only; direct INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER are revoked for ads and p2p_ads. The retired p2p_orders table has zero rows and no client access.
+- BUY creation migration 20261123155929 is applied. create_buy_ad_atomic is postgres-owned SECURITY DEFINER with empty search_path, callable only by authenticated users, and commits both ads and p2p_ads rows atomically. It requires a server-side market price refreshed within ten minutes.
+- SELL interlock 20261123155955 is applied in the escrow RPC; SELL ad creation is also rejected in the API. SELL remains unavailable until ad-specific inventory reservations and idempotent release/refund/expiry restore are implemented.
+- BUY limit migration 20261123160000 is applied; it serializes by owner profile and caps active listings at ten. Live privilege/function checks confirm the new RPC grants and interlock.
+- crypto_market_prices has 1,328 rows, but the latest timestamp is 2026-10-01 and zero rows are fresh within ten minutes. BUY ad creation therefore fails closed until an approved trusted market-price refresh succeeds. This PC has no Supabase URL/service-role environment or local dotenv files, so no one-off production refresh was attempted.
+- Worker safety: src/worker.ts now starts no database/chain work unless at least one individual feature flag is explicitly true. Deposit credit, withdrawals, sweep broadcast and P2P settlement each require separate explicit approval flags. The standalone bundle uses a server-only marker shim and passed a no-flags smoke test without DB/chain access. All feature flags are currently absent/off; no financial worker is running.
+- Free-tier limitation: Render has no free background-worker or cron compute; the current service is a Free web service. Supabase pg_cron is installed, but its only legacy job is inactive, Vault has no secrets, and no financial schedule is configured. Do not claim 24/7 background settlement; the current architecture is deliberately paused.
+- The live Supabase project has no Auth users, profiles, wallets, ads, P2P trades, deposits or ledger rows. Four active deposit-address registry rows reference a missing Auth/profile owner and are intentionally skipped. No financial transaction or billable Didit KYC session was created.
+- Exact applied SQL for the four marketplace migrations has been recovered into their actual Supabase-generated timestamp filenames. This keeps the applied ledger source-controlled; the older un-applied duplicate filenames were removed from the local migration folder.
+- Current release remains NOT PRODUCTION-READY. Outstanding work includes complete historical migration reconciliation, wallet derivation/provisioning vectors and a real signup fixture, market-price refresh, SELL inventory lifecycle, withdrawal/gas/sweeper dependencies, internal transfer/escrow lifecycle, all-function/RLS audit, Didit funding/workflow availability, isolated integration tests, and an operational free-tier scheduler design.
