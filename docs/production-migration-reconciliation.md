@@ -585,3 +585,19 @@ The current Windows checkout has no Supabase URL/service-role variables or local
 Migration 20261123161900_authoritative_internal_transfer_and_escrow_fee_receipts is applied and source-controlled locally. It seeds defaults only when absent: platform_fee_percent=1.5, escrow_fee_percent=1.5, min_trade_amount=10. The canonical execute_internal_transfer RPC now uses an empty search_path and is callable only by service_role; the legacy execute_wallet_transfer routine is revoked from all API roles. The new transfer contract credits the entered requested amount to the recipient and debits amount plus fee from the sender, writes paired user-ledger entries and a platform_fee_collected entry, and returns the exact fee rate captured by the DB transaction for new transfers and idempotent replays.
 
 The initiate_trade_with_escrow RPC uses app_settings.escrow_fee_percent, and the current actor binding, empty search_path, and SELL reservation interlock remain intact. Live verification observed zero customer wallets, transfers, transfer ledger entries, trades or escrow rows; no funds were moved. 53 local contract/unit tests pass, but actual integration with user accounts/wallet rows remains unverified.
+
+
+## Escrow-release and admin-reporting repair — 2026-11-23
+
+The connected project has applied migrations 20261123162654, 20261123163451, 20261123164014 and 20261123164252. Expiry/KYC-tier/cumulative-volume/withdrawal-approval dependencies now use empty search_path with original ACL/definition checks. The internal-only active full-admin predicate is restored and is a prerequisite for the admin dispute wrapper. The escrow release function now calls record_platform_ledger_entry using entry_type=trade_fee_collected and idempotency key pf_p2pfee_<trade_id> on both successful settlement and terminal replay. Cancellation/expiry are not fee-revenue paths and continue refunding the full crypto_amount plus escrow_fee. Admin stats now filter escrow by escrow_status=RELEASED and sweep gas by USD-equivalent network_gas_expense rows. The admin stats RPC executes; all related live trade/escrow/ledger row counts remain zero.
+
+The missing admin_resolve_trade_dispute_atomic RPC is still not applied. The Supabase DDL safety gate rejected the reviewed wrapper migration; no fallback or bypass was used. The wrapper's candidate system notice was modified to use trade_system_events outside Realtime, but the wrapper remains unavailable until its privileged release is approved through the supported migration path. Escrow/dispute launch is therefore still NO-GO.
+
+
+## Escrow/dispute continuation — 2026-11-23
+
+The four newest applied versions are 20261123162654 (empty search paths for KYC-tier, volume, withdrawal-approval and trade-expiry dependencies), 20261123163451 (internal-only full-admin actor predicate), 20261123164014 (idempotent escrow-fee platform-ledger posting on release/replay and RELEASED-state fee reporting), and 20261123164252 (USD-equivalent network gas expense reporting in admin metrics). The live migration ledger contains 156 applied versions and all applied version files are present in the cleanp2p main source tree; 448 SQL files exist locally, of which 292 are not recorded as applied.
+
+The privileged admin dispute settlement RPC expected by the app remains absent. Its reviewed migration was blocked by Supabase's DDL safety gate; do not bypass that gate or route around it with the older non-atomic admin settlement path. The candidate's automated message was adapted to the existing trade_system_events table outside Realtime, but not deployed. Dispute resolution remains a launch blocker.
+
+The 59/59 local contract suite, TypeScript check and worker-bundle build pass. These are source/contract tests only: the connected database has zero customer trades, disputes, escrow ledger rows and wallets, so no real settlement was exercised.

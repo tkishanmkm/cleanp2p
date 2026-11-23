@@ -1,5 +1,3 @@
--- Empty search_path for schema-qualified trade/KYC SECURITY DEFINER dependencies.
--- The function bodies are retained verbatim; ownership and execution ACLs are preserved.
 BEGIN;
 
 DO $trade_dependency_search_path$

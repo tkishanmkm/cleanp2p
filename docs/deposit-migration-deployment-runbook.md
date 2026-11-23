@@ -411,3 +411,8 @@ The current live project is empty of Auth users, profiles, wallets, ads and on-c
 ## Internal transfer and escrow fee contract — 2026-11-23
 
 Applied version 20261123161900_authoritative_internal_transfer_and_escrow_fee_receipts restores canonical app_settings defaults (1.5% transfer fee, 1.5% escrow fee, minimum trade amount 10, without overwriting existing values), reconciles the execute_internal_transfer request/receipt shape with the Next.js API, records fee revenue in platform_ledger_entries, adds fee_rate snapshots to new and idempotent replay receipts, and removes the unused legacy execute_wallet_transfer execution grants. It also switches the internal-transfer SECURITY DEFINER function to an empty search_path. The escrow function loads escrow_fee_percent from app_settings while preserving its trusted actor check and SELL interlock. These statements have not been tested by moving funds; there are no live wallet/profile/transfer rows in the connected project. Do not turn on financial workers based on static test results alone.
+
+
+## Escrow release fees and admin metrics — 2026-11-23
+
+Applied versions 20261123164014 and 20261123164252 restore fee accounting: successful release and completed-trade replay idempotently post the escrow_fee to platform_ledger_entries as trade_fee_collected with key pf_p2pfee_<trade_id>. Cancellation and expiry refund the full escrow value and are not fee-revenue paths. Admin reporting filters RELEASED escrow state and uses only USD-equivalent network_gas_expense entries for sweep/gas-funding costs. No live trade/escrow rows exist, so these are contract-level checks only. The atomic admin dispute wrapper is still unapplied because its DDL safety gate rejected the privileged migration.
