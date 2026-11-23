@@ -3,6 +3,8 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import zlib from 'zlib';
+import { decryptPrivateB2Data, encryptPrivateB2Data } from './private-b2-encryption';
+export { decryptPrivateB2Data, encryptPrivateB2Data, isEncryptedPrivateB2Data } from './private-b2-encryption';
 
 /**
  * Safely obtain sharp instance if installed and native bindings are available.
@@ -316,68 +318,7 @@ function assertSafeB2ObjectKey(key: string): void {
   }
 }
 
-const PRIVATE_B2_ENCRYPTION_PREFIX = Buffer.from('PAXONES_B2_PRIVATE_V1', 'ascii');
-const KYC_ENCRYPTION_PREFIX = Buffer.from('PAXONES_KYC_V1', 'ascii');
 
-function getPrivateB2EncryptionKey(): Buffer {
-  const encoded = process.env.B2_PRIVATE_DATA_ENCRYPTION_KEY?.trim() || '';
-  if (!/^[a-fA-F0-9]{64}$/.test(encoded)) {
-    throw new Error('B2_PRIVATE_DATA_ENCRYPTION_KEY must be a dedicated 32-byte key encoded as 64 hexadecimal characters.');
-  }
-  return Buffer.from(encoded, 'hex');
-}
-
-export function isEncryptedPrivateB2Data(value: Buffer): boolean {
-  return Buffer.isBuffer(value) &&
-    value.length >= PRIVATE_B2_ENCRYPTION_PREFIX.length + 12 + 16 &&
-    value.subarray(0, PRIVATE_B2_ENCRYPTION_PREFIX.length).equals(PRIVATE_B2_ENCRYPTION_PREFIX);
-}
-
-/** Encrypt new private B2 objects with a dedicated AES-256-GCM key. */
-export function encryptPrivateB2Data(value: Buffer): Buffer {
-  if (!Buffer.isBuffer(value)) throw new Error('Private object payload must be a Buffer.');
-  if (isEncryptedPrivateB2Data(value)) return value;
-  if (value.subarray(0, KYC_ENCRYPTION_PREFIX.length).equals(KYC_ENCRYPTION_PREFIX)) {
-    return value; // KYC payloads already use their dedicated KYC_DATA_ENCRYPTION_KEY.
-  }
-  const key = getPrivateB2EncryptionKey();
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const ciphertext = Buffer.concat([cipher.update(value), cipher.final()]);
-  return Buffer.concat([
-    PRIVATE_B2_ENCRYPTION_PREFIX,
-    iv,
-    cipher.getAuthTag(),
-    ciphertext,
-  ]);
-}
-
-/** Decrypt private B2 objects. Legacy plaintext objects fail closed and require migration. */
-export function decryptPrivateB2Data(value: Buffer): Buffer {
-  if (!Buffer.isBuffer(value)) {
-    throw new Error('Private B2 object payload is invalid.');
-  }
-  if (!isEncryptedPrivateB2Data(value)) {
-    if (value.subarray(0, PRIVATE_B2_ENCRYPTION_PREFIX.length).equals(PRIVATE_B2_ENCRYPTION_PREFIX)) {
-      throw new Error('Encrypted private B2 object header is truncated.');
-    }
-    // KYC objects use their own dedicated AES-GCM key and are decrypted by
-    // decryptKycData after this storage-layer boundary.
-    if (value.subarray(0, KYC_ENCRYPTION_PREFIX.length).equals(KYC_ENCRYPTION_PREFIX)) {
-      return value;
-    }
-    throw new Error('Legacy plaintext private B2 objects are disabled pending secure migration.');
-  }
-
-  const key = getPrivateB2EncryptionKey();
-  const offset = PRIVATE_B2_ENCRYPTION_PREFIX.length;
-  const iv = value.subarray(offset, offset + 12);
-  const authTag = value.subarray(offset + 12, offset + 28);
-  const ciphertext = value.subarray(offset + 28);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-}
 
 /**
  * Uploads any buffer directly to Backblaze B2 using runtime env credentials.

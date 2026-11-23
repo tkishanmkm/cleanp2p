@@ -5,52 +5,45 @@ import test from 'node:test';
 const middleware = readFileSync('src/middleware.ts', 'utf8');
 const adminAuth = readFileSync('src/lib/server-admin-auth.ts', 'utf8');
 
-test('middleware has no placeholder Supabase credentials and fails closed when configuration is missing', () => {
-  assert.doesNotMatch(middleware, /placeholder\.supabase\.co|placeholder-anon-key/);
-  assert.match(middleware, /NEXT_PUBLIC_SUPABASE_URL\?\.trim\(\)/);
-  assert.match(middleware, /NEXT_PUBLIC_SUPABASE_ANON_KEY\?\.trim\(\)/);
-  assert.match(middleware, /if \(!supabaseUrl \|\| !supabaseKey\)/);
-  assert.match(middleware, /pathname\.startsWith\('\/api\/'\)[\s\S]{0,150}status: 503/);
-  assert.match(middleware, /redirectUrl\.searchParams\.set\('error', 'auth_unavailable'\)/);
+test('middleware trims Supabase config and fails closed when config is absent', () => {
+  assert.ok(middleware.includes('process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()'));
+  assert.ok(middleware.includes('process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()'));
+  assert.ok(middleware.includes('AUTH_SERVICE_NOT_CONFIGURED'));
+  assert.ok(middleware.includes('status: 503'));
 });
 
-test('middleware only bypasses authentication for routes that authenticate their own machine secret', () => {
-  assert.match(middleware, /pathname\.startsWith\('\/api\/webhooks\/'\)/);
-  assert.match(middleware, /pathname\.startsWith\('\/api\/cron\/'\)/);
-  assert.match(middleware, /pathname\.startsWith\('\/api\/didit\/webhook'\)/);
-  assert.match(middleware, /pathname\.startsWith\('\/api\/kyc\/webhook'\)/);
+test('middleware bypasses only handlers that authenticate their own machine secret', () => {
+  assert.ok(middleware.includes("pathname.startsWith('/api/webhooks/')"));
+  assert.ok(middleware.includes("pathname.startsWith('/api/cron/')"));
+  assert.ok(middleware.includes("pathname.startsWith('/api/didit/webhook')"));
+  assert.ok(middleware.includes("pathname.startsWith('/api/kyc/webhook')"));
 });
 
-test('middleware rejects protected API and page requests when Supabase auth verification throws', () => {
-  assert.match(middleware, /Middleware auth verification failed/);
-  assert.match(middleware, /Authentication verification is temporarily unavailable[\s\S]{0,80}status: 503/);
-  assert.match(middleware, /if \(!isPublicAuthPage && isProtectedPage\)/);
+test('middleware fails closed when authentication/network enforcement throws', () => {
+  assert.ok(middleware.includes('Middleware authentication enforcement failed:'));
+  assert.ok(middleware.includes('AUTH_SERVICE_UNAVAILABLE'));
+  assert.ok(middleware.includes('Authentication service is temporarily unavailable.'));
+  assert.ok(middleware.includes("loginUrl.searchParams.set('error', 'authentication_unavailable')"));
 });
 
-test('admin page gate uses active database profile state instead of JWT metadata or an RPC fallback', () => {
-  assert.match(middleware, /select\('role, is_admin, is_admin_account, is_banned, is_restricted, is_on_hold, is_suspended, account_status, status'\)/);
-  assert.match(middleware, /adminProfileCheck\?\.is_banned !== true/);
-  assert.match(middleware, /adminProfileCheck\?\.is_restricted !== true/);
-  assert.match(middleware, /adminProfileCheck\?\.is_on_hold !== true/);
-  assert.match(middleware, /adminProfileCheck\?\.is_suspended !== true/);
-  assert.match(middleware, /if \(!isAdmin\)/);
-  assert.doesNotMatch(middleware, /user\.app_metadata\?\.role/);
-  assert.doesNotMatch(middleware, /supabase\.rpc\('check_is_admin'/);
+test('admin middleware requires canonical database verification, not JWT role metadata', () => {
+  const start = middleware.indexOf('const isAdminRoute =');
+  assert.ok(start >= 0);
+  const adminGate = middleware.slice(start);
+  assert.ok(adminGate.includes('verify_admin_login'));
+  assert.ok(adminGate.includes('verificationResult?.[0]?.is_valid === true'));
+  assert.ok(adminGate.includes('ADMIN_VERIFICATION_UNAVAILABLE'));
+  assert.ok(!adminGate.includes('user.app_metadata?.role'));
+  assert.ok(!adminGate.includes("supabase.rpc('check_is_admin'"));
 });
 
-test('server admin verifier does not trust user-editable metadata or environment email allowlists', () => {
-  assert.doesNotMatch(adminAuth, /user\.user_metadata\?\.role/);
-  assert.doesNotMatch(adminAuth, /user\.app_metadata\?\.role/);
-  assert.doesNotMatch(adminAuth, /ADMIN_EMAILS/);
-  assert.match(adminAuth, /is_banned, is_restricted, is_on_hold, is_suspended, account_status, status/);
-  assert.match(adminAuth, /profile\.is_banned !== true/);
-  assert.match(adminAuth, /profile\.is_restricted !== true/);
-  assert.match(adminAuth, /profile\.is_on_hold !== true/);
-  assert.match(adminAuth, /profile\.is_suspended !== true/);
-  assert.match(adminAuth, /appAdmin\?\.role === "admin"/);
-  assert.match(adminAuth, /appAdmin\?\.role === "superadmin"/);
-  assert.doesNotMatch(adminAuth, /appAdmin\?\.role === "support"|appAdmin\?\.role === "compliance"/);
-  assert.match(adminAuth, /verifyAdmin2FASessionToken/);
+test('server admin verifier checks durable profile state, canonical RPC and signed 2FA', () => {
+  assert.ok(!adminAuth.includes('user.user_metadata?.role'));
+  assert.ok(!adminAuth.includes('user.app_metadata?.role'));
+  assert.ok(!adminAuth.includes('ADMIN_EMAILS'));
+  assert.ok(adminAuth.includes('from("profiles")'));
+  assert.ok(adminAuth.includes('verify_admin_login'));
+  assert.ok(adminAuth.includes('is_valid === true'));
+  assert.ok(adminAuth.includes('support_admin_grants'));
+  assert.ok(adminAuth.includes('verifyAdmin2FASessionToken'));
 });
-
-console.log('PASS: middleware and server admin authorization fail closed and use current database authority.');

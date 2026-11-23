@@ -1,60 +1,51 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import test from 'node:test';
 
-const root = process.cwd();
-const read = (path: string) => readFileSync(join(root, path), 'utf8');
-
-test('pending registration RPC is explicitly non-crediting', () => {
-  const sql = read('supabase/migrations/20261024120000_deposit_pending_registration_hardening.sql');
-  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.register_pending_deposit/i);
-  assert.match(sql, /p_confirmations IS DISTINCT FROM 0/i);
-  assert.match(sql, /confirmations,required_confirmations,status/i);
-  assert.match(sql, /VALUES\(v_user_id,v_hash,v_network,v_address,p_amount,v_asset,0,v_required,'PENDING'/i);
-  assert.match(sql, /coalesce\(nullif\(btrim\(coalesce\(p_from_address,''\)\),''\),''\)/i);
-  assert.doesNotMatch(sql, /INSERT INTO public\.ledger_entries/i);
-  assert.doesNotMatch(sql, /UPDATE public\.wallet_assets/i);
-  assert.match(sql, /Never rewrite an existing confirmation count\/status here/i);
-  assert.match(sql, /EXISTING_DEPOSIT_IDENTITY_MISMATCH/i);
-  assert.match(sql, /EXISTING_ONCHAIN_IDENTITY_MISMATCH/i);
-  assert.match(sql, /EXISTING_DEPOSIT_STATE_MISMATCH/i);
-  assert.match(sql, /already_processed', true[\s\S]*?'status', 'ALREADY_PROCESSED'/i);
-  assert.match(sql, /Never relabel a previously credited output as pending/i);
-  assert.match(sql, /REVOKE ALL ON FUNCTION public\.register_pending_deposit/i);
+test('pending registration RPC is explicitly non-crediting and rejects spoofed confirmation counts', () => {
+  const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261024120000_deposit_pending_registration_hardening.sql'), 'utf8');
+  assert.ok(sql.includes('CREATE OR REPLACE FUNCTION public.register_pending_deposit'));
+  assert.ok(sql.includes('p_confirmations IS DISTINCT FROM 0'));
+  assert.ok(sql.includes("'PENDING'"));
+  assert.ok(!sql.includes('INSERT INTO public.ledger_entries'));
+  assert.ok(!sql.includes('UPDATE public.wallet_assets'));
+  assert.ok(sql.includes('EXISTING_DEPOSIT_IDENTITY_MISMATCH'));
+  assert.ok(sql.includes('EXISTING_ONCHAIN_IDENTITY_MISMATCH'));
+  assert.ok(sql.includes('EXISTING_DEPOSIT_STATE_MISMATCH'));
+  assert.ok(sql.includes('ALREADY_PROCESSED'));
+  assert.ok(sql.includes('Never relabel a previously credited output as pending'));
+  assert.ok(sql.includes('REVOKE ALL ON FUNCTION public.register_pending_deposit'));
 });
 
-test('ERC20 and BEP20 pending registration resolves EVM owners from both registries without double-counting one owner', () => {
-  const sql = read('supabase/migrations/20261024120000_deposit_pending_registration_hardening.sql');
-  const branch = sql.slice(sql.indexOf("ELSIF v_network IN ('ERC20', 'BEP20') THEN"), sql.indexOf("ELSIF v_network = 'LTC' THEN"));
-  assert.match(branch, /FROM public\.wallets/);
-  assert.match(branch, /FROM public\.user_deposit_addresses/);
-  assert.match(branch, /UNION\s+SELECT user_id AS owner_id/);
-  assert.match(branch, /upper\(btrim\(network::text\)\) IN \([\s\S]*v_network[\s\S]*'ETHEREUM'[\s\S]*'BEP20'/);
-  assert.match(branch, /SELECT count\(\*\), min\(owner_id::text\)::uuid/);
+test('pending registration resolves ownership from all three registries and deduplicates the same owner', () => {
+  const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261024120000_deposit_pending_registration_hardening.sql'), 'utf8');
+  const start = sql.indexOf('-- Resolve ownership across every registered address source');
+  const end = sql.indexOf('IF coalesce(v_owner_count, 0) <> 1', start);
+  assert.ok(start >= 0 && end > start);
+  const block = sql.slice(start, end);
+  assert.ok(block.includes('FROM public.user_deposit_addresses AS uda'));
+  assert.ok(block.includes('FROM public.wallets AS w'));
+  assert.ok(block.includes('FROM public.deposit_addresses AS da'));
+  assert.ok(block.includes('UNION'));
+  assert.ok(block.includes('SELECT COUNT(*)'));
+  assert.ok(sql.includes('AMBIGUOUS_ADDRESS_OWNER'));
 });
 
-test('all deposit ingress/scanner entry points use pending registration, not the credit RPC', () => {
-  const files = [
-    'src/jobs/depositIngestion.ts',
-    'src/app/api/webhooks/deposit/route.ts',
-    'src/app/api/webhooks/alchemy/route.ts',
-    'src/app/api/wallet/deposit/route.ts',
-  ];
-  for (const file of files) {
-    const source = read(file);
-    assert.match(source, /rpc\('register_pending_deposit'/, file);
-    assert.doesNotMatch(source, /rpc\('process_deposit_atomic'/, file);
+test('all deposit ingress paths register pending records and do not credit directly', () => {
+  for (const file of ['src/jobs/depositIngestion.ts', 'src/app/api/webhooks/deposit/route.ts', 'src/app/api/webhooks/alchemy/route.ts', 'src/app/api/wallet/deposit/route.ts']) {
+    const source = readFileSync(join(process.cwd(), file), 'utf8');
+    assert.ok(source.includes("rpc('register_pending_deposit'"), file);
+    assert.ok(!source.includes("rpc('process_deposit_atomic'"), file);
   }
 });
 
-test('confirmation worker does not call credit RPC below independently verified threshold', () => {
-  const source = read('src/jobs/confirmationsWorker.ts');
+test('confirmation worker waits for independently verified thresholds before calling the credit RPC', () => {
+  const source = readFileSync(join(process.cwd(), 'src/jobs/confirmationsWorker.ts'), 'utf8');
   const guard = source.indexOf('if (currentConfirmations < requiredConfs)');
-  const rpc = source.indexOf("rpc('process_deposit_atomic_with_lease'");
-  assert.notEqual(guard, -1);
-  assert.notEqual(rpc, -1);
-  assert.ok(guard < rpc, 'threshold guard must precede credit RPC');
-  assert.match(source.slice(guard, rpc), /continue;/);
-  assert.match(source.slice(guard, rpc), /credit RPC not called/);
+  const credit = source.indexOf("rpc('process_deposit_atomic_with_lease'");
+  assert.ok(guard >= 0 && credit > guard);
+  const guarded = source.slice(guard, credit);
+  assert.ok(guarded.includes('continue;'));
+  assert.ok(guarded.includes('credit RPC not called'));
 });

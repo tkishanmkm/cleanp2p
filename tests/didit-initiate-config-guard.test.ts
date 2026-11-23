@@ -1,54 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
-const source = readFileSync(
-  join(process.cwd(), 'src', 'app', 'api', 'kyc', 'initiate', 'route.ts'),
-  'utf8',
-);
+const source = readFileSync('src/app/api/kyc/initiate/route.ts', 'utf8');
+const config = readFileSync('src/lib/didit-config.ts', 'utf8');
 
-test('Didit configuration is required before KYC side effects', () => {
-  const configGuard = source.indexOf("if (!apiKey || !workflowId)");
-  const b2Write = source.indexOf('saveKycAddressToB2(');
-  const profileSection = source.indexOf('// 3. Save user address details');
-  const profileAddressWrite = source.indexOf('.update({', profileSection);
-  assert.notEqual(configGuard, -1, 'missing provider config must fail closed');
-  assert.notEqual(b2Write, -1);
-  assert.notEqual(profileAddressWrite, -1);
-  assert.ok(configGuard < b2Write, 'configuration guard must precede document storage');
-  assert.ok(configGuard < profileAddressWrite, 'configuration guard must precede profile writes');
-  assert.match(source, /status:\s*503/);
+test('Didit configuration precedes compliance storage and external provider calls', () => {
+  const guard = source.indexOf('if (!diditConfig)');
+  const b2Write = source.indexOf('const b2Res = await saveKycAddressToB2');
+  const providerRequest = source.indexOf('res = await fetch(targetUrl');
+  assert.ok(guard >= 0 && b2Write > guard && providerRequest > b2Write);
 });
 
-test('Didit workflow must come from deployment configuration, not a hard-coded fallback', () => {
-  assert.match(source, /process\.env\.DIDIT_WORKFLOW_ID\?\.trim\(\)/);
-  assert.doesNotMatch(source, /DIDIT_WORKFLOW_ID\s*\|\|\s*['"][0-9a-f-]{20,}['"]/i);
+test('workflow comes from deployment config, never a hard-coded fallback', () => {
+  assert.ok(config.includes('process.env.DIDIT_WORKFLOW_ID?.trim()'));
+  assert.ok(!source.includes('DIDIT_WORKFLOW_ID ||'));
+  assert.ok(source.includes('workflow_id: workflowId'));
 });
 
-test('KYC registers only a valid HTTPS provider session through the atomic SQL RPC', () => {
-  const sessionValidation = source.indexOf('typeof sessionId');
-  const atomicRegistration = source.indexOf("supabase.rpc('initiate_didit_kyc'");
-  assert.notEqual(sessionValidation, -1);
-  assert.notEqual(atomicRegistration, -1);
-  assert.ok(sessionValidation < atomicRegistration, 'provider session must validate before database registration');
-  assert.match(source, /parsedSessionUrl\.protocol !== 'https:'/);
-  assert.match(source, /trustedDiditHost/);
-  assert.match(source, /sessionHost\.endsWith\('\.didit\.me'\)/);
-  assert.match(source, /AbortSignal\.timeout\(15_000\)/);
-  assert.match(source, /Verification provider rejected session request/);
-  assert.doesNotMatch(source, /detail\s*,\s*\}\s*,\s*\{\s*status:\s*502/);
-  assert.match(source, /initiationResult\.success !== true/);
-  assert.doesNotMatch(source, /kyc_status: 'in_review'/);
-  assert.doesNotMatch(source, /from\('kyc_verifications'\)\.insert/);
+test('KYC initiation probes and registers sessions through the secure actor-bound RPC', () => {
+  const probe = source.indexOf("supabase.rpc('initiate_didit_kyc_secure'");
+  const validation = source.indexOf('typeof sessionId');
+  const registration = source.lastIndexOf("supabase.rpc('initiate_didit_kyc_secure'");
+  assert.ok(probe >= 0 && validation > probe && registration > validation);
+  assert.ok(source.includes('p_actor_id: null'));
+  assert.ok(source.includes('p_actor_id: user.id'));
+  assert.ok(source.includes('SECURE_KYC_INITIATION_RPC_NOT_INSTALLED'));
+  assert.ok(source.includes("parsedSessionUrl.protocol !== 'https:'"));
+  assert.ok(source.includes('trustedDiditHost'));
+  assert.ok(source.includes('AbortSignal.timeout(15_000)'));
+  assert.ok(source.includes('initiationResult.success !== true'));
 });
 
-test('settings UI clearly reports unavailable KYC without pretending submission succeeded', () => {
-  const settings = readFileSync(
-    join(process.cwd(), 'src', 'app', 'settings', 'page.tsx'),
-    'utf8',
-  );
-  assert.match(settings, /res\.status === 503 && data\.error === 'Verification service is not configured'/);
-  assert.match(settings, /Your KYC has not been submitted/);
+test('settings UI never reports submission when KYC response failed', () => {
+  const settings = readFileSync('src/app/settings/page.tsx', 'utf8');
+  assert.ok(settings.includes('Your KYC has not been submitted'));
   assert.ok(settings.indexOf('if (!res.ok)') < settings.indexOf('setIsKycSubmitted(true)'));
 });

@@ -9,7 +9,7 @@ assert.ok(callback.includes('${trustedOrigin}'), 'OAuth popup postMessage must u
 assert.ok(!callback.includes("OAUTH_AUTH_SUCCESS' }, '*'"), 'OAuth callback must not send auth success messages to wildcard origin');
 
 const captcha = readFileSync(resolve(process.cwd(), 'src/app/api/admin/auth/verify-captcha/route.ts'), 'utf8');
-assert.ok(captcha.includes('if (!hcaptchaSecret)'), 'Admin CAPTCHA must detect missing provider secret');
+assert.ok(captcha.includes('if (!hcaptchaSecret || !hcaptchaSitekey)'), 'Admin CAPTCHA must detect missing provider secret or site key');
 assert.ok(captcha.includes('status: 503'), 'Admin CAPTCHA must fail closed if provider configuration is missing');
 assert.ok(!captcha.includes('Notice: HCAPTCHA_SECRET_KEY is not configured on server.'), 'Missing CAPTCHA secret must not be treated as success');
 

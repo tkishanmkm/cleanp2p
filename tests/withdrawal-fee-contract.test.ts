@@ -22,11 +22,11 @@ assert.match(gasOracle, /Dynamic on-demand fallback calculation/);
 assert.match(withdrawalService, /MIN_WITHDRAWAL_USD_NOT_MET/);
 assert.match(withdrawalService, /usdEquivalent < 5/);
 assert.match(withdrawalService, /is_restricted, is_suspended/);
-assert.match(withdrawalService, /is_restricted: true/);
+assert.match(withdrawalService, /userProfile\.is_restricted === true/);
 assert.doesNotMatch(withdrawalService, /account_status: 'restricted'/);
 
 assert.match(dialog, /withdrawAmt \* liveAssetPrice < 5/);
-assert.match(dialog, /Minimum Withdrawal Not Met/);
+assert.match(dialog, /t\('withdrawDialog\.minimumWithdrawalNotMet'\)/);
 
 assert.match(sweeper, /MIN_SWEEP_VALUE_USD = 5\.0/);
 assert.match(sweeper, /meetsMinimumSweepUsdValue\('USDT', balanceUsdt\)/);

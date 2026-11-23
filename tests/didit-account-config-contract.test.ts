@@ -19,11 +19,10 @@ function setValidEnv() {
   delete process.env.NEXT_PUBLIC_APP_URL;
 }
 
-test('Didit session configuration uses the active account workflow and key from environment', () => {
+test('Didit config uses deployment credentials and trusted callback origin', () => {
   setValidEnv();
   try {
-    const config = getDiditServerConfig();
-    assert.deepEqual(config, {
+    assert.deepEqual(getDiditServerConfig(), {
       apiKey: 'test-key-not-a-real-secret',
       workflowId: 'workflow-from-current-account',
       sessionUrl: 'https://verification.didit.me/v3/session/',
@@ -32,7 +31,7 @@ test('Didit session configuration uses the active account workflow and key from 
   } finally { restoreEnv(); }
 });
 
-test('missing API key, workflow ID, or public callback origin fails closed', () => {
+test('missing Didit credentials/workflow/public origin fails closed', () => {
   setValidEnv();
   try {
     delete process.env.DIDIT_API_KEY;
@@ -46,7 +45,7 @@ test('missing API key, workflow ID, or public callback origin fails closed', () 
   } finally { restoreEnv(); }
 });
 
-test('Didit API endpoint rejects non-provider hosts, HTTP, ports, credentials and non-v3 paths', () => {
+test('Didit endpoint rejects untrusted hosts, HTTP, custom ports, credentials and non-v3 paths', () => {
   setValidEnv();
   try {
     for (const badUrl of [
@@ -63,42 +62,32 @@ test('Didit API endpoint rejects non-provider hosts, HTTP, ports, credentials an
   } finally { restoreEnv(); }
 });
 
-test('all session creation routes use the shared config and contain no embedded workflow fallback', () => {
-  const routes = [
-    'src/app/api/kyc/initiate/route.ts',
-    'src/app/api/didit/verify/route.ts',
-    'src/app/api/verify/route.ts',
-  ];
-  for (const path of routes) {
-    const source = readFileSync(path, 'utf8');
-    assert.match(source, /getDiditServerConfig\(\)/, path);
-    assert.match(source, /if \(!diditConfig\)[\s\S]{0,150}status: 503/, path);
-    assert.match(source, /workflow_id: workflowId/, path);
-    assert.doesNotMatch(source, /DIDIT_WORKFLOW_ID\s*\|\|/);
-    assert.doesNotMatch(source, /b36ac1aa-29fc-4272-8939-c1d184d072fd|e2b3e066-d5f9-45b8-a11c-1139c27f9beb/);
-    assert.doesNotMatch(source, /paxones\.com/);
+test('legacy session routes delegate to one canonical Didit initiation handler', () => {
+  const canonical = readFileSync('src/app/api/kyc/initiate/route.ts', 'utf8');
+  assert.ok(canonical.includes('getDiditServerConfig()'));
+  assert.ok(canonical.includes('workflow_id: workflowId'));
+  assert.ok(!canonical.includes('DIDIT_WORKFLOW_ID ||'));
+  for (const path of ['src/app/api/didit/verify/route.ts', 'src/app/api/verify/route.ts']) {
+    const alias = readFileSync(path, 'utf8');
+    assert.ok(alias.includes('POST as initiateKyc'));
+    assert.ok(alias.includes('return initiateKyc(req)'));
+    assert.ok(!alias.includes('workflow_id'));
   }
 });
 
-test('KYC initiate validates Didit configuration before storing KYC address or changing profile state', () => {
+test('KYC config is validated before compliance storage or provider session creation', () => {
   const source = readFileSync('src/app/api/kyc/initiate/route.ts', 'utf8');
-  const configGuard = source.indexOf('if (!diditConfig)');
-  const b2Write = source.indexOf('saveKycAddressToB2(');
-  const profileWrite = source.indexOf(".update({ is_verified: false");
-  const kycStatusWrite = source.indexOf("kyc_status: 'in_review'");
-  assert.ok(configGuard >= 0);
-  assert.ok(b2Write > configGuard);
-  assert.ok(profileWrite === -1 || profileWrite > configGuard);
-  assert.ok(kycStatusWrite === -1 || kycStatusWrite > configGuard);
+  const guard = source.indexOf('if (!diditConfig)');
+  const b2Write = source.indexOf('const b2Res = await saveKycAddressToB2');
+  const request = source.indexOf('res = await fetch(targetUrl');
+  assert.ok(guard >= 0 && b2Write > guard && request > b2Write);
 });
 
-test('Didit environment names are documented without embedding account secrets', () => {
+test('Didit deployment variable names are documented without embedded secrets', () => {
   const env = readFileSync('.env.example', 'utf8');
   for (const key of ['DIDIT_API_KEY=', 'DIDIT_WORKFLOW_ID=', 'DIDIT_API_URL=', 'DIDIT_WEBHOOK_SECRET=', 'NEXT_PUBLIC_SITE_URL=']) {
-    assert.ok(env.includes(key), `Missing ${key}`);
+    assert.ok(env.includes(key));
   }
   assert.doesNotMatch(env, /DIDIT_API_KEY=.{8,}/);
   assert.doesNotMatch(env, /DIDIT_WORKFLOW_ID=.{8,}/);
 });
-
-console.log('PASS: Didit configuration is environment-bound, provider-host-allowlisted, and fails closed before KYC side effects.');

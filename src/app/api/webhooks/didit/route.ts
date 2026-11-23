@@ -32,8 +32,8 @@ async function readRequestBodyBounded(req: NextRequest): Promise<string | null> 
 }
 
 function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error('Didit webhook Supabase configuration is missing');
   }
@@ -146,13 +146,13 @@ export async function POST(req: NextRequest) {
     const sigV2 = (req.headers.get('x-signature-v2') || '').trim();
     const sigV1 = (req.headers.get('x-signature') || '').trim();
     const tsHeader = req.headers.get('x-timestamp');
-    // Require a numeric Unix timestamp and reject missing, zero, malformed, or stale values.
-    // Confirm the exact header/unit requirement against the configured Didit webhook version.
-    if (!tsHeader || !/^\d{10}(?:\.\d{1,3})?$/.test(tsHeader.trim())) {
+    // Didit webhook timestamps are Unix seconds expressed as a 10-digit integer.
+    // Reject fractions, malformed values, and stale events to prevent replay-window ambiguity.
+    if (!tsHeader || !/^\d{10}$/.test(tsHeader.trim())) {
       return new NextResponse('Missing or invalid timestamp', { status: 401 });
     }
-    const ts = Number(tsHeader);
-    if (!Number.isFinite(ts) || ts <= 0 || Math.abs(Date.now() / 1000 - ts) > 300) {
+    const ts = Number(tsHeader.trim());
+    if (!Number.isSafeInteger(ts) || ts <= 0 || Math.abs(Date.now() / 1000 - ts) > 300) {
       return new NextResponse('Stale timestamp', { status: 401 });
     }
 
