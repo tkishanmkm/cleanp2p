@@ -146,6 +146,17 @@ export async function POST(
         return NextResponse.json({ error: 'Cannot mark paid: trade is currently in dispute.' }, { status: 400 });
       }
 
+      // Reject a missing, malformed, or elapsed payment deadline before asking
+      // the trusted server-only RPC to change the trade's payment state. The
+      // database RPC must enforce the same deadline atomically before release.
+      const paymentDeadlineMs = trade.expires_at ? Date.parse(trade.expires_at) : Number.NaN;
+      if (!Number.isFinite(paymentDeadlineMs) || paymentDeadlineMs <= Date.now()) {
+        return NextResponse.json(
+          { success: false, error: 'The trade payment window has expired.', code: 'TRADE_PAYMENT_WINDOW_EXPIRED' },
+          { status: 409 }
+        );
+      }
+
       // 1. Read the trade's already stored payment_method
       const tradeStoredMethod = typeof trade?.payment_method === 'string' ? trade.payment_method.trim() : '';
 
@@ -500,25 +511,16 @@ export async function POST(
         return NextResponse.json({ error: 'Cannot expire trade: A dispute is active on this trade.' }, { status: 400 });
       }
 
-      // Check expiration timestamp
-      if (!trade.expires_at || new Date(trade.expires_at).getTime() > Date.now()) {
+      // Require a valid elapsed deadline. The canonical database RPC repeats
+      // this check while holding the trade row lock before refunding any escrow.
+      const expiresAtMs = trade.expires_at ? Date.parse(trade.expires_at) : Number.NaN;
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()) {
         return NextResponse.json({ error: 'Trade payment window has not expired yet.' }, { status: 400 });
       }
 
-      // Fail closed: the current expiry RPC credits several wallet mirrors,
-      // has no internal expiry-timestamp check, and its migration grants EXECUTE
-      // to authenticated users. Do not invoke it until one canonical atomic,
-      // authorization-checked refund-and-expire RPC is verified in staging.
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Trade expiry is temporarily unavailable until atomic escrow refund accounting and RPC permissions are verified.',
-          code: 'TRADE_EXPIRY_ACCOUNTING_UNVERIFIED',
-        },
-        { status: 503 },
-      );
-
-      // Legacy RPC call retained below for audit reference; unreachable while guarded.
+      // Canonical expiry RPC is SECURITY DEFINER with an empty search_path and
+      // service_role-only EXECUTE. It rechecks expiry, paid/dispute/terminal state,
+      // and wallet escrow under row locks before the atomic refund.
       const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
         p_trade_id: actualTradeId,
       });
