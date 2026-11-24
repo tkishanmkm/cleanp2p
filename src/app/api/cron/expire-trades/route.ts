@@ -9,7 +9,7 @@ function isAuthorized(req: NextRequest): boolean {
     allowedSecrets: [
       process.env.CRON_SECRET_KEY,
       process.env.CRON_SECRET,
-      process.env.DEPOSIT_WORKER_SECRET,
+      process.env.WAYONES_P2P_EXPIRY_WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
   });

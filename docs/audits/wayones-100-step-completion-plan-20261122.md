@@ -226,3 +226,13 @@ A step is complete only when its specific change is reviewed and the required ev
 - The candidate migration remains UNAPPLIED. Supabase's apply safety gate blocked the privileged DDL, so `admin_resolve_trade_dispute_atomic` remains absent on the live database. The explicit feature flag stays off and the API remains fail-closed. Do not bypass the safety gate or use a legacy non-atomic admin settlement path.
 - The obsolete admin-dispute test was replaced with assertions for the current route, feature flag, expected RPC name, full-admin predicate, audit record and non-Realtime system-event behavior.
 - The dispute/escrow completion group remains OPEN until the privileged migration is approved through the supported Supabase process and isolated integration tests verify first settlement, replay, cancellation/expiry races, winner selection, ledger posting and event dedupe against test trades.
+
+
+## Current execution update — 2026-11-24 (trade-expiry worker credential isolation)
+
+- Re-verified the active worktree is the intended `tkishanmkm/cleanp2p` repository on `main`, clean at `1e455652ce9e8a5f3a6a849c681e7525af51f09f` before this change. The saved contract run was **63/63** passing.
+- Live Supabase inspection confirms `cancel_expired_p2p_trades()`, `expire_p2p_trade(uuid)`, `cancel_p2p_trade(uuid,uuid,text)`, `release_trade_escrow(uuid,uuid)` and `mark_p2p_trade_paid(uuid,uuid,text)` are postgres-owned SECURITY DEFINER functions with empty search_path and service_role-only execution. `raise_trade_dispute(uuid,uuid,text)` is also executable by authenticated users and binds the supplied actor to `auth.uid()`.
+- The only matching legacy `pg_cron` expiry job is inactive. Its command targets `auto_cancel_expired_p2p_trades(15)`, not the current `cancel_expired_p2p_trades()` RPC. No cron schedule was enabled or changed.
+- The HTTP `/api/cron/expire-trades` route previously accepted `DEPOSIT_WORKER_SECRET`, crossing the deposit-worker and trade-expiry trust boundaries. The route now accepts the shared cron secrets or a distinct optional `WAYONES_P2P_EXPIRY_WORKER_SECRET`; `.env.example` documents that credential separately.
+- Added `tests/trade-expiry-worker-secret-boundary.test.ts`. Targeted trade-expiry/admin-dispute/escrow/worker safety tests pass **22/22**; TypeScript check and `git diff --check` pass.
+- No Supabase DDL, database state, worker flags, cron schedules, Render secrets, production deployment or financial settlement were changed. The new dedicated secret is only documented as optional; it has not been provisioned. This does not complete the expiry lifecycle or the full security audit.
