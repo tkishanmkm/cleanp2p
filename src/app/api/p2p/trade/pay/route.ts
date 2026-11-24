@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
     }
 
-    let query = supabase.from('trades').select('id,buyer_id,seller_id,status,escrow_status');
+    let query = supabase.from('trades').select('id,buyer_id,seller_id,status,escrow_status,expires_at');
     query = UUID_RE.test(tradeId) ? query.eq('id', tradeId) : query.eq('trade_id', tradeId);
     const { data: trade, error: tradeError } = await query.maybeSingle();
     if (tradeError) {
@@ -49,6 +49,16 @@ export async function POST(request: NextRequest) {
     }
     if (trade.buyer_id !== user.id) {
       return NextResponse.json({ success: false, error: 'Only the buyer can mark this trade as paid.' }, { status: 403 });
+    }
+
+    // Reject expired or missing deadlines before invoking the trusted RPC.
+    // The database function must independently repeat this guard under its row lock.
+    const paymentDeadlineMs = trade.expires_at ? Date.parse(trade.expires_at) : Number.NaN;
+    if (!Number.isFinite(paymentDeadlineMs) || paymentDeadlineMs <= Date.now()) {
+      return NextResponse.json(
+        { success: false, error: 'The trade payment window has expired.', code: 'TRADE_PAYMENT_WINDOW_EXPIRED' },
+        { status: 409 }
+      );
     }
 
     // The RPC is service-role-only. The authenticated buyer was verified
