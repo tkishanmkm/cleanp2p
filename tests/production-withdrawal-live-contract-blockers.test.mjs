@@ -7,16 +7,16 @@ const worker = readFileSync("src/jobs/withdrawalWorker.ts", "utf8");
 const audit = readFileSync("docs/PRODUCTION-STEP-20261031-WITHDRAWAL-RPC-TABLE-CONTRACT-BLOCKERS.md", "utf8");
 
 test("withdrawal creation fails closed when the idempotency lookup is unavailable", () => {
-  assert.match(service, /rpc\('lookup_withdrawal_idempotency_replay'/);
-  assert.match(service, /status: 'WITHDRAWAL_REPLAY_LOOKUP_UNAVAILABLE'[\s\S]*?statusCode: 503/);
+  assert.match(service, /'get_withdrawal_idempotency_replay'/);
+  assert.match(service, /status: 'IDEMPOTENCY_LOOKUP_UNAVAILABLE'[\s\S]*?statusCode: 503/);
   assert.match(service, /rpc\('request_withdrawal_idempotent'/);
   assert.doesNotMatch(service, /rpc\('request_withdrawal',/);
 });
 
-test("worker requires paired rows and owner-token fencing before dispatch", () => {
-  assert.match(worker, /rpc\('claim_pending_withdrawals',[\s\S]*?p_owner_token: ownerToken/);
+test("worker requires paired rows and per-withdrawal worker fencing before dispatch", () => {
+  assert.match(worker, /rpc\('claim_pending_withdrawals',[\s\S]*?p_worker_id: workerId/);
   assert.match(worker, /paired user-facing withdrawal[\s\S]*?refusing to broadcast/i);
-  assert.match(worker, /rpc\('record_withdrawal_broadcast',[\s\S]*?p_owner_token: ownerToken/);
+  assert.match(worker, /rpc\('record_onchain_withdrawal_broadcast',[\s\S]*?p_worker_id: workerId/);
 });
 
 test("production withdrawal blockers are recorded without speculative schema changes", () => {

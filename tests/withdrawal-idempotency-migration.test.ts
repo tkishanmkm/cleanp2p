@@ -18,7 +18,7 @@ const settlementMigration = readFileSync(
   'utf8'
 );
 const atomicBroadcastMigration = readFileSync(
-  'supabase/migrations/20261020150000_atomic_withdrawal_broadcast_state.sql',
+  'supabase/migrations/20261102212707_durable_withdrawal_broadcasts.sql',
   'utf8'
 );
 const restrictQueueClaimMigration = readFileSync(
@@ -38,6 +38,10 @@ const client = readFileSync('src/context/wallet-context.tsx', 'utf8');
 const retryStore = readFileSync('src/lib/withdrawal-idempotency-store.ts', 'utf8');
 const processor = readFileSync('src/lib/withdrawal-processor.ts', 'utf8');
 const workerRoute = readFileSync('src/app/api/workers/withdraw/route.ts', 'utf8');
+const currentWithdrawalContract = readFileSync(
+  'supabase/migrations/20261102195301_repair_withdrawal_end_to_end_contract.sql',
+  'utf8'
+);
 
 assert.match(migration, /CREATE OR REPLACE FUNCTION public\.request_withdrawal_idempotent/i);
 assert.match(migration, /p_idempotency_key TEXT/i);
@@ -84,26 +88,30 @@ for (const [routeName, routeSource] of [
   ['wallet withdrawal route', walletWithdrawalRoute],
 ] as const) {
   assert.match(routeSource, /MAX_WITHDRAWAL_REQUEST_BYTES\s*=\s*4\s*\*\s*1024/i, `${routeName} must cap request bodies at 4 KiB`);
-  assert.match(routeSource, /await (?:request|req)\.text\(\)/i, `${routeName} must inspect raw request bytes`);
-  assert.match(routeSource, /TextEncoder\(\)\.encode\(rawBody\)\.byteLength\s*>\s*MAX_WITHDRAWAL_REQUEST_BYTES/i, `${routeName} must enforce actual body size`);
+  assert.match(routeSource, /await readBoundedBody\((?:request|req)\)/i, `${routeName} must inspect a bounded request stream`);
+  assert.match(routeSource, /totalBytes\s*\+=\s*value\.byteLength[\s\S]*?totalBytes\s*>\s*MAX_WITHDRAWAL_REQUEST_BYTES/i, `${routeName} must enforce actual streamed byte size`);
   assert.match(routeSource, /JSON\.parse\(rawBody\)/i, `${routeName} must reject malformed JSON`);
   assert.match(routeSource, /Array\.isArray\(parsed\)/i, `${routeName} must reject array bodies`);
 }
 
-assert.match(service, /\.select\('amount, asset_symbol, created_at', \{ count: 'exact' \}\)/i,
-  'rolling-limit precheck must request an exact count to detect truncated history');
-assert.match(service, /withdrawalHistoryCount !== past24hWithdrawals\.length/i,
-  'rolling-limit precheck must fail closed when returned history is incomplete');
+assert.match(service, /Per-withdrawal and rolling 24-hour limits are authoritative in[\s\S]*?public\.request_withdrawal/i,
+  'withdrawal velocity limits must be checked inside the atomic database reservation');
+assert.match(currentWithdrawalContract, /FROM public\.profiles[\s\S]*?WHERE id = p_user_id[\s\S]*?FOR UPDATE/i,
+  'the current withdrawal contract must serialize a user before calculating limits');
+assert.match(currentWithdrawalContract, /Maximum single withdrawal limit exceeded[\s\S]*?Rolling 24-hour withdrawal limit exceeded/i,
+  'the current withdrawal contract must enforce single and rolling 24-hour limits');
 assert.match(service, /rpc\('request_withdrawal_idempotent'/i);
-assert.match(service, /rpc\('lookup_withdrawal_idempotency_replay'/i);
-assert.match(service, /typeof input\.idempotencyKey !== 'string'[\s\S]*?input\.idempotencyKey\.length < 8[\s\S]*?input\.idempotencyKey\.length > 128/i,
+assert.match(service, /'get_withdrawal_idempotency_replay'/i);
+assert.match(service, /typeof input\.idempotencyKey !== 'string'[\s\S]*?input\.idempotencyKey\.length < 16[\s\S]*?input\.idempotencyKey\.length > 128/i,
   'withdrawal service must reject missing and malformed idempotency keys');
+assert.ok(service.includes('!/^[A-Za-z0-9._:-]+$/.test(input.idempotencyKey)'),
+  'withdrawal service must restrict idempotency keys to safe characters');
 assert.ok(
   service.indexOf("typeof input.idempotencyKey !== 'string'") <
-  service.indexOf("const replay = await supabaseAdmin.rpc('lookup_withdrawal_idempotency_replay'") &&
+  service.indexOf("'get_withdrawal_idempotency_replay'") &&
   service.indexOf("typeof input.idempotencyKey !== 'string'") <
-  service.indexOf('const isPendingApproval = await hasPendingWithdrawalApproval'),
-  'idempotency key validation must happen before replay lookup and mutable approval checks'
+  service.indexOf('const { data: replayLookup, error: replayLookupError }'),
+  'idempotency key validation must happen before replay lookup'
 );
 assert.equal((service.match(/status: 'INVALID_IDEMPOTENCY_KEY'/g) || []).length, 1,
   'idempotency key must be validated in one early guard, not duplicated after spending-limit checks');
@@ -111,17 +119,17 @@ assert.match(service, /Every request uses the idempotent reservation RPC/i,
   'withdrawal reservation must always use the idempotent wrapper');
 assert.doesNotMatch(service, /else\s*\{\s*const result = await supabaseAdmin\.rpc\('request_withdrawal'/i,
   'withdrawal service must not bypass idempotency with a direct reservation RPC');
-assert.match(service, /WITHDRAWAL_REPLAY_LOOKUP_UNAVAILABLE/i);
-assert.match(service, /replay\.data\?\.found === true[\s\S]*?return \{[\s\S]*?withdrawalId: originalId/i,
+assert.match(service, /IDEMPOTENCY_LOOKUP_UNAVAILABLE/i);
+assert.match(service, /replayLookup\.found === true[\s\S]*?return \{[\s\S]*?withdrawalId: savedWithdrawalId/i,
   'exact retries must return the original withdrawal instead of reserving again');
 assert.ok(
-  service.indexOf("const replay = await supabaseAdmin.rpc('lookup_withdrawal_idempotency_replay'") <
-  service.indexOf('hasPendingWithdrawalApproval(user.id)') &&
-  service.indexOf("const replay = await supabaseAdmin.rpc('lookup_withdrawal_idempotency_replay'") <
-  service.toLowerCase().indexOf('rolling 24-hour daily withdrawal limit'),
-  'replay lookup must happen before mutable approval and rolling-limit checks'
+  service.indexOf("'get_withdrawal_idempotency_replay'") <
+  service.indexOf('const feeInfo = await resolveAuthoritativeWithdrawalFee') &&
+  service.indexOf("'get_withdrawal_idempotency_replay'") <
+  service.indexOf("'request_withdrawal_idempotent'"),
+  'replay lookup must happen before fresh fee checks and atomic reservation'
 );
-assert.match(service, /This idempotency key was already used for a different withdrawal/i);
+assert.match(service, /This idempotency key was already used for different withdrawal details/i);
 assert.doesNotMatch(service, /\.eq\('destination_address', validDestination\)[\s\S]*?\.eq\('amount', parsedAmount\)/,
   'do not infer a retry merely from equal amount and destination');
 assert.match(service, /RESERVATION_UNCONFIRMED/i,
@@ -190,86 +198,90 @@ assert.match(settlementMigration, /Confirmed transaction hash does not match per
 assert.match(settlementMigration, /inconsistent completion state; manual reconciliation required/i,
   'completion retries must reject inconsistent terminal states instead of returning success');
 const withdrawalWorker = readFileSync('src/jobs/withdrawalWorker.ts', 'utf8');
-assert.match(withdrawalWorker, /Lease unavailable or already held; refusing to dispatch withdrawals/i,
-  'worker must fail closed if the owner-token lease cannot be acquired');
-assert.match(withdrawalWorker, /const lease = await acquireWithdrawalWorkerLease\(\)/,
-  'worker must acquire the database-backed owner-token lease before dispatch');
-assert.match(withdrawalWorker, /if \(lease\.isLost\(\)\)/,
-  'worker must stop claiming new withdrawals if lease renewal is lost');
-assert.match(withdrawalWorker, /return \{ totalProcessed: 0, results: \[\], locked: true \};[\s\S]*?const results: WithdrawalProcessResult\[\] = \[\]/,
-  'failed lock acquisition must return before entering the dispatch loop');
+const withdrawalLeaseMigration = readFileSync(
+  'supabase/migrations/20261102212707_durable_withdrawal_broadcasts.sql',
+  'utf8'
+);
+assert.match(withdrawalWorker, /p_worker_id: workerId/,
+  'worker must pass its stable per-batch identity to the atomic row claim');
+assert.match(withdrawalWorker, /worker_id\/lease_expires_at fence[\s\S]*?processWithdrawalQueue\(workerId\)/,
+  'worker must use per-withdrawal lease fencing instead of a process-wide lease');
+assert.match(withdrawalLeaseMigration, /FOR UPDATE SKIP LOCKED[\s\S]*?worker_id = p_worker_id[\s\S]*?lease_expires_at = pg_catalog\.clock_timestamp\(\) \+ interval '5 minutes'/i,
+  'claim RPC must atomically claim an unlocked withdrawal and issue an expiring owner fence');
+assert.match(withdrawalLeaseMigration, /worker_id IS DISTINCT FROM p_worker_id[\s\S]*?lease_expires_at <= pg_catalog\.clock_timestamp\(\)/i,
+  'durable signing and broadcast RPCs must reject expired or mismatched worker ownership');
 assert.match(restrictQueueClaimMigration, /REVOKE ALL ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) FROM PUBLIC, anon, authenticated/i,
   'untrusted roles must not invoke the SECURITY DEFINER withdrawal queue claim');
 assert.match(restrictQueueClaimMigration, /GRANT EXECUTE ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) TO service_role, postgres/i,
   'only trusted worker/database roles should claim withdrawals');
-assert.match(withdrawalWorker, /Atomic nonce allocation unavailable; refusing EVM withdrawal dispatch/i,
-  'EVM withdrawal dispatch must fail closed when atomic nonce allocation fails');
-assert.doesNotMatch(withdrawalWorker, /falling back to on-chain count/i,
-  'EVM nonce allocation must not fall back to an unsafe non-atomic nonce');
+assert.match(withdrawalWorker, /Lease-bound nonce allocation failed/i,
+  'EVM withdrawal must fail closed when its durable nonce reservation fails');
+assert.match(withdrawalWorker, /HOT_WALLET_NONCE_STREAM_BUSY:[\s\S]*?NONCE_STREAM_WAITING/i,
+  'an unresolved earlier hot-wallet nonce must wait safely instead of being skipped');
+assert.match(withdrawalWorker, /allocate_onchain_withdrawal_nonce[\s\S]*?p_onchain_pending_nonce: onchainPending/i,
+  'nonce reservation must reconcile the database sequence with the chain pending nonce');
 const tronProvider = readFileSync('src/lib/blockchain/tron.ts', 'utf8');
-assert.match(tronProvider, /if \(!txInfo \|\| !txInfo\.blockNumber\)[\s\S]*?success: undefined/,
+assert.match(tronProvider, /!txInfo[\s\S]*?!txInfo\.blockNumber[\s\S]*?success: undefined/,
   'missing or not-yet-indexed TRON transaction info must be treated as indeterminate');
 assert.match(tronProvider, /catch \(err\)[\s\S]*?success: undefined/,
   'TRON RPC errors must not be treated as proof of transaction failure');
-assert.match(tronProvider, /receiptResult === 'SUCCESS'[\s\S]*?typeof receiptResult === 'string'[\s\S]*?success =/,
+assert.match(tronProvider, /const receiptResult = String\([\s\S]*?receiptResult === 'SUCCESS'[\s\S]*?knownFailureResults\.has\(receiptResult\)/,
   'TRON transaction outcome must come from an explicit receipt result');
-assert.match(withdrawalWorker, /else if \(success === false\)/,
-  'TRON refunds must require an explicit failed transaction outcome');
+assert.match(withdrawalWorker, /success === false && confirmations >= TRON_CONFIG\.requiredConfirmations/,
+  'TRON refunds must require an explicit failed transaction outcome after required confirmations');
 assert.match(withdrawalWorker, /txData\.status\?\.confirmed === true/, 'BTC/LTC confirmation must be explicit');
 assert.match(withdrawalWorker, /Number\.isSafeInteger\(txData\.fee\)/, 'BTC/LTC settlement must reject malformed fee data');
 assert.match(withdrawalWorker, /confirmations >= chain.requiredConfirmations && status === 1/,
   'EVM settlement must require an explicit successful receipt status');
 assert.doesNotMatch(withdrawalWorker, /confirmations >= chain.requiredConfirmations && status !== 0/,
   'unknown EVM receipt status must never be treated as successful');
-assert.match(atomicBroadcastMigration, /CREATE OR REPLACE FUNCTION public\.record_withdrawal_broadcast/i);
-assert.match(atomicBroadcastMigration, /SELECT status, tx_hash INTO v_onchain_status, v_onchain_hash[\s\S]*?SELECT status, tx_hash, txid INTO v_withdrawal_status, v_withdrawal_hash, v_withdrawal_txid/i,
-  'broadcast RPC must read both existing transaction hashes under row locks');
-assert.match(atomicBroadcastMigration, /Conflicting transaction hash exists for withdrawal/i,
-  'broadcast retries must not overwrite an already recorded transaction hash');
-assert.match(atomicBroadcastMigration, /onchain_withdrawals_status_check[\s\S]*?NEEDS_APPROVAL[\s\S]*?AMBIGUOUS_BROADCAST[\s\S]*?NOT VALID/i,
-  'on-chain status constraint must preserve NEEDS_APPROVAL and allow ambiguous broadcast recovery');
+assert.match(atomicBroadcastMigration, /CREATE OR REPLACE FUNCTION public\.record_onchain_withdrawal_broadcast/i);
+assert.match(atomicBroadcastMigration, /SELECT \*[\s\S]*?FROM public\.onchain_withdrawals[\s\S]*?FOR UPDATE[\s\S]*?FROM public\.onchain_withdrawal_broadcasts[\s\S]*?FOR UPDATE/i,
+  'broadcast RPC must lock the withdrawal and its durable signed payload');
+assert.match(atomicBroadcastMigration, /Persisted signed withdrawal\/hash does not match the active broadcast lease/i,
+  'broadcast retries must reject a hash that differs from the leased persisted payload');
+assert.match(atomicBroadcastMigration, /CREATE TABLE IF NOT EXISTS public\.onchain_withdrawal_broadcasts[\s\S]*?signed_tx text NOT NULL[\s\S]*?tx_hash text NOT NULL/i,
+  'broadcast recovery must retain signed bytes and their transaction hash durably');
 assert.match(withdrawalSchemaParityMigration, /ALTER TABLE public\.withdrawals ADD COLUMN IF NOT EXISTS tx_hash TEXT/i,
   'prior schema migration must add withdrawals.tx_hash before atomic broadcast RPC uses it');
 assert.match(withdrawalSchemaParityMigration, /ALTER TABLE public\.withdrawals ADD COLUMN IF NOT EXISTS broadcast_error TEXT/i,
   'prior schema migration must add withdrawals.broadcast_error before ambiguous recovery uses it');
-assert.match(atomicBroadcastMigration, /withdrawals_status_check[\s\S]*?AMBIGUOUS_BROADCAST[\s\S]*?NOT VALID/i,
-  'withdrawal status constraint must allow ambiguous broadcast recovery without blocking migration on legacy rows');
-assert.match(atomicBroadcastMigration, /FOR UPDATE[\s\S]*?FROM public\.withdrawals[\s\S]*?FOR UPDATE/i,
-  'atomic broadcast transition must lock both financial records before updating either');
-assert.match(atomicBroadcastMigration, /UPDATE public\.onchain_withdrawals[\s\S]*?UPDATE public\.withdrawals[\s\S]*?RETURN jsonb_build_object\('success', true/i,
-  'both broadcast state updates must occur within one PostgreSQL function transaction');
-assert.match(atomicBroadcastMigration, /REVOKE EXECUTE ON FUNCTION public\.record_withdrawal_broadcast\(UUID, TEXT\) FROM PUBLIC, anon, authenticated/i,
+assert.match(atomicBroadcastMigration, /UPDATE public\.onchain_withdrawal_broadcasts[\s\S]*?UPDATE public\.onchain_withdrawals[\s\S]*?UPDATE public\.withdrawals[\s\S]*?RETURN pg_catalog\.jsonb_build_object/i,
+  'broadcast state and paired withdrawal mirror must update in one database transaction');
+assert.match(atomicBroadcastMigration, /REVOKE ALL ON FUNCTION public\.record_onchain_withdrawal_broadcast\(uuid,text,text\)[\s\S]*?FROM PUBLIC, anon, authenticated/i,
   'broadcast state RPC must not be callable by untrusted roles');
-assert.equal((withdrawalWorker.match(/rpc\('record_withdrawal_broadcast'/g) || []).length, 2,
+assert.equal((withdrawalWorker.match(/rpc\('record_onchain_withdrawal_broadcast'/g) || []).length, 3,
   'TRON and EVM broadcasts must use the atomic database transition');
-assert.match(atomicBroadcastMigration, /CREATE OR REPLACE FUNCTION public\.record_ambiguous_withdrawal_broadcast/i);
-assert.match(atomicBroadcastMigration, /Conflicting transaction hash exists/i);
-assert.match(atomicBroadcastMigration, /terminal and cannot become ambiguous/i);
-assert.match(atomicBroadcastMigration, /REVOKE EXECUTE ON FUNCTION public\.record_ambiguous_withdrawal_broadcast\(UUID, TEXT, TEXT\) FROM PUBLIC, anon, authenticated/i);
-assert.match(withdrawalWorker, /rpc\('record_ambiguous_withdrawal_broadcast',[\s\S]*?p_tx_hash: broadcastTxHash \|\| null/i,
+assert.match(atomicBroadcastMigration, /CREATE OR REPLACE FUNCTION public\.mark_withdrawal_ambiguous_broadcast/i);
+assert.match(atomicBroadcastMigration, /Ambiguous withdrawal requires the exact persisted signed transaction/i);
+assert.match(atomicBroadcastMigration, /terminal and cannot be reused/i);
+assert.match(atomicBroadcastMigration, /REVOKE ALL ON FUNCTION public\.mark_withdrawal_ambiguous_broadcast\(uuid,text,text,text\)[\s\S]*?FROM PUBLIC, anon, authenticated/i);
+assert.match(withdrawalWorker, /rpc\('mark_withdrawal_ambiguous_broadcast',[\s\S]*?p_tx_hash: broadcastTxHash,/i,
   'uncertain broadcast recovery must use the atomic RPC and preserve a known hash');
 assert.doesNotMatch(withdrawalWorker, /\.from\('onchain_withdrawals'\)\s*\.update\(\{\s*status: 'AMBIGUOUS_BROADCAST'/i,
   'ambiguous state must not be written as a separate direct table update');
-assert.match(withdrawalWorker, /broadcastTxHash = tx\.hash/i,
-  'known EVM transaction hash must be retained for ambiguous reconciliation');
 assert.match(withdrawalWorker, /broadcastTxHash = txHash/i,
+  'known EVM transaction hash must be retained for ambiguous reconciliation');
+assert.match(withdrawalWorker, /broadcastTxHash = prepared\.txHash/i,
   'known TRON transaction hash must be retained for ambiguous reconciliation');
-assert.match(withdrawalWorker, /TRON transaction reverted on-chain`[\s\S]*?p_is_verified_revert: true/i);
+assert.match(withdrawalWorker, /TRON transaction reverted on-chain'[\s\S]*?p_is_verified_unbroadcast: true/i,
+  'current refund contract must receive the verified-failure flag after TRON finality and payload checks');
 assert.match(withdrawalWorker, /if \(error \|\| !settings\)[\s\S]*?allowed: false, reason: 'Withdrawal controls could not be verified/i,
   'withdrawal dispatch must fail closed if platform settings cannot be read');
 assert.match(withdrawalWorker, /catch \(err\) \{\s*return \{ allowed: false, reason: 'Withdrawal controls could not be verified/i,
   'withdrawal dispatch must fail closed if settings lookup throws');
-assert.match(withdrawalWorker, /rpc\('record_withdrawal_broadcast',[\s\S]*?p_tx_hash: txHash/i,
+assert.match(withdrawalWorker, /rpc\('record_onchain_withdrawal_broadcast',[\s\S]*?p_tx_hash: prepared\.txHash/i,
   'TRON broadcast must persist its transaction hash through the atomic transition');
-assert.match(withdrawalWorker, /rpc\('record_withdrawal_broadcast',[\s\S]*?p_tx_hash: tx\.hash/i,
+assert.match(withdrawalWorker, /rpc\('record_onchain_withdrawal_broadcast',[\s\S]*?p_tx_hash: txHash/i,
   'EVM broadcast must persist its transaction hash through the atomic transition');
-assert.match(withdrawalWorker, /txHash: tx\.hash,[\s\S]*?nonce,[\s\S]*?status: 'BROADCASTED'/i,
+assert.match(withdrawalWorker, /txHash,[\s\S]*?nonce,[\s\S]*?status: 'BROADCASTED'/i,
   'EVM dispatch result must report broadcasted, not completed, before confirmations');
 assert.match(withdrawalWorker, /p_gas_asset: 'BTC',[\s\S]*?settlementData\.success !== true[\s\S]*?confirmed\+\+/i,
   'BTC worker must only count settlement as confirmed when the RPC reports success');
 assert.match(withdrawalWorker, /p_gas_asset: 'LTC',[\s\S]*?settlementData\.success !== true[\s\S]*?confirmed\+\+/i,
   'LTC worker must only count settlement as confirmed when the RPC reports success');
-assert.match(readFileSync('src/jobs/withdrawalWorker.ts', 'utf8'), /EVM transaction reverted on-chain on network \$\{w\.network\}`[\s\S]*?p_is_verified_revert: true/i);
+assert.match(withdrawalWorker, /EVM transaction reverted on-chain on network \$\{w\.network\}`[\s\S]*?p_is_verified_unbroadcast: true/i,
+  'current refund contract must receive the verified-failure flag only after EVM receipt proof');
 
 // USD valuation must fail closed instead of inventing a $1 price for volatile assets.
 assert.match(fees, /Never invent a \$1 price for a volatile asset/i);

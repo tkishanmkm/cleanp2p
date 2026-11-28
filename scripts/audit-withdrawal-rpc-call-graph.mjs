@@ -5,8 +5,10 @@ const root = resolve(process.argv[2] ?? '.');
 const roots = ['src/app/api', 'src/jobs', 'src/worker.ts', 'src/lib'];
 const targetNames = new Set([
   'request_withdrawal', 'request_withdrawal_idempotent', 'lookup_withdrawal_idempotency_replay',
-  'process_failed_withdrawal', 'claim_pending_withdrawals', 'record_withdrawal_broadcast',
-  'record_ambiguous_withdrawal_broadcast', 'approve_withdrawal', 'admin_reject_withdrawal',
+  'get_withdrawal_idempotency_replay', 'process_failed_withdrawal', 'claim_pending_withdrawals',
+  'record_withdrawal_broadcast', 'record_onchain_withdrawal_broadcast',
+  'record_ambiguous_withdrawal_broadcast', 'mark_withdrawal_ambiguous_broadcast',
+  'approve_withdrawal', 'admin_reject_withdrawal', 'reject_withdrawal_pending_approval',
   'acquire_withdrawal_worker_lease', 'renew_withdrawal_worker_lease', 'release_withdrawal_worker_lease',
 ]);
 const files = [];

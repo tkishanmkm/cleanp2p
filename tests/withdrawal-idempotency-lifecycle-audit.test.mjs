@@ -33,7 +33,7 @@ test('same key with different intent fails closed rather than returning another 
 
 test('application uses idempotent reservation and replay lookup, not direct request RPC', () => {
   assert.match(service, /rpc\('request_withdrawal_idempotent'/i);
-  assert.match(service, /rpc\('lookup_withdrawal_idempotency_replay'/i);
+  assert.match(service, /'get_withdrawal_idempotency_replay'/i);
   assert.doesNotMatch(service, /rpc\('request_withdrawal'\s*,/i);
 });
 
