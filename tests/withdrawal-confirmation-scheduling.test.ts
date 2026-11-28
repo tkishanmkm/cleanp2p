@@ -12,7 +12,7 @@ test('confirmation worker selects due transactions in deterministic scheduled or
   assert.match(worker, /\.order\('next_confirmation_check_at', \{ ascending: true \}\)/);
   assert.match(worker, /\.order\('created_at', \{ ascending: true \}\)/);
   assert.match(worker, /\.order\('id', \{ ascending: true \}\)/);
-  assert.match(worker, /\.update\(\{ next_confirmation_check_at: nextCheckAt \}\)/);
+  assert.match(worker, /rpc\('schedule_withdrawal_confirmation_check',[\s\S]*?p_withdrawal_id: w\.id,[\s\S]*?p_tx_hash: w\.tx_hash,[\s\S]*?p_next_check_at: nextCheckAt/);
   assert.match(worker, /Do not touch updated_at: orphan detection uses it/);
 });
 

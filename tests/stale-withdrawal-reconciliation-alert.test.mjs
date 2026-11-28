@@ -13,7 +13,7 @@ test('reconciliation flags stale PROCESSING withdrawals with no transaction hash
 
 test('stale un-hashed withdrawals are not automatically refunded or re-queued', () => {
   const start = source.indexOf('// Stale PROCESSING rows without a tx hash');
-  const end = source.indexOf('// 1. Calculate sum of user spot wallet balances', start);
+  const end = source.indexOf('// Read canonical wallet liability and all active withdrawal totals', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const monitor = source.slice(start, end);

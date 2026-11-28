@@ -1,48 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 const migration = readFileSync(
-  join(process.cwd(), 'supabase', 'migrations', '20261025045656_withdrawal_worker_owner_lease.sql'),
+  'supabase/migrations/20261102212707_durable_withdrawal_broadcasts.sql',
   'utf8',
 );
-const worker = readFileSync(
-  join(process.cwd(), 'src', 'jobs', 'withdrawalWorker.ts'),
-  'utf8',
-);
-const leaseHelper = readFileSync(
-  join(process.cwd(), 'src', 'jobs', 'withdrawalWorkerLease.ts'),
-  'utf8',
-);
+const worker = readFileSync('src/jobs/withdrawalWorker.ts', 'utf8');
 
-test('withdrawal lease serializes owners and expires abandoned leases', () => {
-  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.withdrawal_worker_leases/);
-  assert.match(migration, /expires_at <= now\(\)/);
-  assert.match(migration, /owner_token = EXCLUDED\.owner_token/);
-  assert.match(migration, /owner_token = p_owner_token[\s\S]*expires_at > now\(\)/);
-  assert.match(migration, /WHERE lease_name = 'withdrawal-dispatch'[\s\S]*AND owner_token = p_owner_token/);
-  assert.match(migration, /RETURN FOUND;/);
-  assert.equal((migration.match(/RETURN COALESCE\(v_owner = p_owner_token, false\);/g) || []).length, 2, 'acquire/renew must return explicit false when ownership was not returned');
+test('withdrawal queue claim assigns a bounded expiring lease to one worker', () => {
+  const start = migration.indexOf('CREATE OR REPLACE FUNCTION public.claim_pending_withdrawals(');
+  const end = migration.indexOf('$function$;', start);
+  assert.ok(start >= 0 && end > start);
+  const claim = migration.slice(start, end);
+  assert.match(claim, /p_worker_id text/);
+  assert.match(claim, /A valid withdrawal worker ID is required/);
+  assert.match(claim, /FOR UPDATE SKIP LOCKED/);
+  assert.match(claim, /worker_id = p_worker_id/);
+  assert.match(claim, /lease_expires_at = pg_catalog\.clock_timestamp\(\) \+ interval '5 minutes'/);
+  assert.match(claim, /lease_expires_at IS NULL OR w\.lease_expires_at <= pg_catalog\.clock_timestamp\(\)/);
 });
 
-test('lease RPCs cannot be called by client roles', () => {
-  assert.ok(migration.includes('REVOKE ALL ON FUNCTION public.acquire_withdrawal_worker_lease(uuid, integer) FROM PUBLIC, anon, authenticated;'));
-  assert.ok(migration.includes('REVOKE ALL ON FUNCTION public.renew_withdrawal_worker_lease(uuid, integer) FROM PUBLIC, anon, authenticated;'));
-  assert.ok(migration.includes('REVOKE ALL ON FUNCTION public.release_withdrawal_worker_lease(uuid) FROM PUBLIC, anon, authenticated;'));
-  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.acquire_withdrawal_worker_lease\(uuid, integer\) TO service_role, postgres/);
-  assert.match(migration, /SET search_path = ''/);
+test('withdrawal worker fences broadcast recording by the active row lease', () => {
+  const start = migration.indexOf('CREATE OR REPLACE FUNCTION public.record_onchain_withdrawal_broadcast(');
+  const end = migration.indexOf('$function$;', start);
+  assert.ok(start >= 0 && end > start);
+  const recorder = migration.slice(start, end);
+  assert.match(recorder, /v_withdrawal\.worker_id IS DISTINCT FROM p_worker_id/);
+  assert.match(recorder, /v_withdrawal\.lease_expires_at <= pg_catalog\.clock_timestamp\(\)/);
+  assert.match(recorder, /v_payload\.worker_id IS DISTINCT FROM p_worker_id/);
+  assert.match(recorder, /Persisted signed withdrawal\/hash does not match the active broadcast lease/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.record_onchain_withdrawal_broadcast\(uuid,text,text\)[\s\S]*?GRANT EXECUTE ON FUNCTION public\.record_onchain_withdrawal_broadcast\(uuid,text,text\)\s+TO service_role/);
 });
 
-test('withdrawal worker uses lease ownership and stops claiming work if renewal is lost', () => {
-  assert.match(worker, /acquireWithdrawalWorkerLease/);
-  assert.match(worker, /if \(lease\.isLost\(\)\)/);
-  assert.match(worker, /await lease\.stop\(\)/);
-  assert.doesNotMatch(worker, /rpc\('acquire_withdrawal_worker_lock'\)/);
-  assert.doesNotMatch(worker, /rpc\('release_withdrawal_worker_lock'\)/);
-  assert.match(leaseHelper, /renew_withdrawal_worker_lease/);
-  assert.match(leaseHelper, /release_withdrawal_worker_lease/);
-  assert.match(leaseHelper, /ownerToken: string/);
-  assert.match(leaseHelper, /return \{[\s\S]*ownerToken,[\s\S]*isLost:/, 'the lease owner token must be available for database fencing');
-  assert.match(leaseHelper, /setInterval/);
+test('canonical worker passes one worker ID through claim and broadcast transitions', () => {
+  assert.match(worker, /processWithdrawalQueue\(workerId: string = randomUUID\(\)\)/);
+  assert.match(worker, /rpc\('claim_pending_withdrawals',[\s\S]*?p_worker_id: workerId/);
+  assert.match(worker, /record_onchain_withdrawal_broadcast',[\s\S]*?p_worker_id: workerId/);
+  assert.match(worker, /processWithdrawalQueue\(workerId\)/);
+  assert.doesNotMatch(worker, /acquireWithdrawalWorkerLease/);
 });
