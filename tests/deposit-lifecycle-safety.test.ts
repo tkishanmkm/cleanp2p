@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 const worker = read('src/jobs/confirmationsWorker.ts');
-const registrationMigration = read('supabase/migrations/20261104130000_deposit_confirmation_contract.sql');
+const registrationMigration = read('supabase/migrations/20261123153730_deposit_confirmation_contract.sql');
 
 test('deposit credit requires independently verified on-chain output evidence and threshold', () => {
   const verificationUnavailable = worker.indexOf('if (!onChainData)');

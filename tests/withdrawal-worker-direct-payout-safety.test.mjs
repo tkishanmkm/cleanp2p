@@ -15,7 +15,8 @@ test('legacy worker endpoint authenticates then permanently refuses dispatch', (
 });
 
 test('canonical worker requires and forwards the database lease owner token', () => {
-  assert.match(canonical, /processWithdrawalQueue\(ownerToken: string\)/);
-  assert.match(canonical, /p_owner_token: ownerToken/);
-  assert.match(canonical, /processWithdrawalQueue\(lease\.ownerToken\)/);
+  assert.match(canonical, /processWithdrawalQueue\(workerId: string = randomUUID\(\)\)/);
+  assert.match(canonical, /rpc\('claim_pending_withdrawals',[\s\S]*?p_worker_id: workerId/);
+  assert.match(canonical, /record_onchain_withdrawal_broadcast',[\s\S]*?p_worker_id: workerId/);
+  assert.match(canonical, /processWithdrawalQueue\(workerId\)/);
 });

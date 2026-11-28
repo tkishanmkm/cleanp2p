@@ -57,7 +57,7 @@ No production migration, live transaction, secret change or deployment is part o
 24. [x] Verify EVM BIP44 derivation and ETH/USDT ERC20/USDT BEP20 shared-address mapping against independent disposable-root vectors. USDC/BNB are not in the supported asset set and remain excluded.
 25. [x] Verify LTC BIP84 mainnet derivation against known disposable mnemonic address vectors at wallet indices 1, 7 and 316; parity passes.
 26. [x] Verify TRON BIP44 derivation, Base58Check and USDT TRC20 address mapping against independent disposable-root vectors.
-27. [ ] Compare derived addresses against approved production key-ceremony/known-index fixtures without accessing customer private keys. Disposable fixtures pass but do not satisfy production attestation.
+27. [ ] Compare derived addresses against approved production key-ceremony/known-index fixtures without accessing customer private keys. Requirement recorded: a key custodian must provide an independently approved derivation-path/coin-account attestation plus a signed or otherwise approved set of address-only fixtures for multiple allocated wallet indexes on BTC, LTC, EVM (covers ETH/ERC20/BEP20), and TRON. The verifier needs only the public xpubs and expected public addresses; never request or place mnemonic, seed, private key, recovery material, or xprv in chat, logs, source control, or ordinary test output. Disposable fixtures pass but do not satisfy production attestation.
 28. [x] Confirm xpub-only mode is fail-closed and cannot silently fall back to mnemonic mode (source review: mnemonic accessors throw when enabled; all four validated account xpubs are mandatory).
 29. [ ] Enforce immutable user ownership, wallet index and chain-address identity at database level.
 30. [ ] Enforce canonical address uniqueness and cross-registry collision checks (schema-specific chain-aware index migration drafted locally; not applied or verified).
@@ -174,6 +174,20 @@ A step is complete only when its specific change is reviewed and the required ev
 - The `check_is_admin(uuid,uuid)` permission finding remains a confirmed blocker: current active-project read-only evidence shows authenticated EXECUTE is still true. Do not treat the local ACL migration or its source contract test as remediation; isolated PostgreSQL runtime validation and an approved production migration remain outstanding.
 - Local regression tests now align reserved wallet-index zero rejection and current withdrawal refund finality/verified-unbroadcast parameters. UTXO, ingestion, withdrawal, and internal-transfer focused checks pass; full evidence is in `docs/AUTONOMOUS-PROGRESS.md` dated 2026-11-28. No live database, chain, transaction, worker, or production approval gate was changed.
 - Some broader legacy tests still reference missing migration source versions; migration history reconciliation remains open. Do not infer runtime SQL safety from these static tests.
+
+## Current execution update — 2026-11-28 (withdrawal worker fencing assertion correction)
+
+- Investigated the two reported test failures against the current worker, the fencing migration and the durable-broadcast migration. The tests expected the retired process-wide lease signature `processWithdrawalQueue(ownerToken)` and `p_owner_token` at the worker RPC boundary. The current design uses a per-withdrawal worker ID (`p_worker_id`) with `onchain_withdrawals.worker_id` and `lease_expires_at`; claims and broadcast recording verify that owner and expiration in the database. `src/jobs/withdrawalWorkerLease.ts` is explicitly deprecated and unused.
+- Updated only the two stale tests to assert the current per-withdrawal fencing contract and its claim/broadcast callsites. Regression tests: `withdrawal-worker-database-fencing` and `withdrawal-worker-direct-payout-safety` **PASS 7/7**. No worker implementation or migration behavior changed.
+- Step 27 now explicitly records what evidence can complete it: custodian-approved derivation-path/coin-account attestation and approved public-address fixtures across multiple indexes for BTC, LTC, EVM and TRON. It explicitly forbids handling secret key material in chat/logs/source control. Step remains open until evidence is actually provided and verified.
+- No real financial operation, worker activation, production DB write, or key access occurred. `check_is_admin(uuid,uuid)` remains an unresolved confirmed blocker. See progress log for the full batch record and pending security blocker.
+
+## Current execution update — 2026-11-28 (withdrawal and deposit contract test alignment)
+
+- The two withdrawal lease failures were stale assertions for the retired queue-wide owner-token API. Updated the tests to assert the current per-withdrawal `workerId`/database expiry fencing contract. The worker and migrations were not changed.
+- Deposit contract review found two stale expectations: UTXO amounts are compared as exact integer base units and LTC requires six confirmations. One lifecycle test referred to a superseded migration filename; current source is `20261123153730_deposit_confirmation_contract.sql`. Aligned those tests with current implementation and migration history.
+- Verification: focused withdrawal checks **10/10**, deposit registration/ingress/confirmation/chain verifier/reconciliation suite **48/48**, TypeScript **PASS**, diff check **PASS**. No database or financial state was mutated. Step 06 remains **IN PROGRESS**, Step 27 remains **OPEN** for approved key-ceremony evidence, and the `check_is_admin(uuid,uuid)` privilege issue remains a security blocker.
+- Next: push this tested source-test/documentation batch after fresh `origin/main` comparison, then continue with KYT/AML, ledger reconciliation, withdrawals, recovery, gas and sweep checks. Static/source tests do not resolve production or isolated database verification blockers.
 
 
 ## Current execution evidence and blockers (2026-11-23)

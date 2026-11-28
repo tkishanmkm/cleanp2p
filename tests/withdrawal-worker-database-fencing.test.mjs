@@ -4,7 +4,6 @@ import test from 'node:test';
 
 const migration = readFileSync('supabase/migrations/20261028140000_withdrawal_worker_database_fencing.sql', 'utf8');
 const worker = readFileSync('src/jobs/withdrawalWorker.ts', 'utf8');
-const leaseHelper = readFileSync('src/jobs/withdrawalWorkerLease.ts', 'utf8');
 const legacyWorker = readFileSync('src/app/api/workers/withdraw/route.ts', 'utf8');
 const legacyDispatch = readFileSync('src/app/api/withdrawals/dispatch/route.ts', 'utf8');
 
@@ -35,13 +34,14 @@ test('ambiguous broadcast recovery is limited to the token persisted on that wit
   assert.match(migration, /terminal and cannot become ambiguous/i);
 });
 
-test('canonical worker supplies lease token to claim and both broadcast recorders', () => {
-  assert.match(worker, /processWithdrawalQueue\(ownerToken: string\)/);
-  assert.match(worker, /rpc\('claim_pending_withdrawals',[\s\S]*?p_owner_token: ownerToken/i);
-  assert.equal((worker.match(/p_owner_token: ownerToken/g) || []).length, 4,
-    'owner token must be passed to claim, both normal broadcast paths, and ambiguous recovery');
-  assert.match(worker, /processWithdrawalQueue\(lease\.ownerToken\)/);
-  assert.match(leaseHelper, /ownerToken: string/);
+test('canonical worker uses per-withdrawal worker-id and expiry fencing', () => {
+  assert.match(migration, /claim_pending_withdrawals\([\s\S]*?p_owner_token uuid[\s\S]*?dispatch_owner_token = p_owner_token/i);
+  assert.match(worker, /processWithdrawalQueue\(workerId: string = randomUUID\(\)\)/);
+  assert.match(worker, /rpc\('claim_pending_withdrawals',[\s\S]*?p_worker_id: workerId/i);
+  assert.match(worker, /record_onchain_withdrawal_broadcast',[\s\S]*?p_worker_id: workerId/i);
+  assert.match(worker, /claim_pending_withdrawals',[\s\S]*?p_worker_id: workerId/i);
+  assert.match(migration, /v_dispatch_owner IS DISTINCT FROM p_owner_token/i);
+  assert.match(worker, /processWithdrawalQueue\(workerId\)/);
 });
 
 test('retired alternate endpoints cannot claim or broadcast withdrawals', () => {

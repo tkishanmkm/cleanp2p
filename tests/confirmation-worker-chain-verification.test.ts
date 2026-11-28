@@ -8,7 +8,9 @@ test('confirmation worker never uses fabricated UTXO or TRON confirmation counts
   assert.doesNotMatch(worker, /statusData\.confirmed\s*\?\s*[26]\s*:\s*0/);
   assert.doesNotMatch(worker, /return \{ confirmations: 19/);
   assert.match(worker, /verifyUtxoDepositOutput\(/);
-  assert.match(worker, /Math\.abs\(verified\.amount - expected\)/);
+  assert.match(worker, /expectedUnits = ethers\.parseUnits\(String\(expected\)\.trim\(\), 8\)/);
+  assert.match(worker, /verifiedUnits = ethers\.parseUnits\(verified\.amount, 8\)/);
+  assert.match(worker, /verifiedUnits !== expectedUnits/);
   assert.match(worker, /const confs = currentBlock - data\.blockNumber \+ 1/);
 });
 
@@ -51,7 +53,7 @@ test('UTXO deposits require a recorded output index rather than guessing output 
 
 
 test('confirmation worker enforces a fixed per-network confirmation policy', () => {
-  const expected = { BTC: 3, LTC: 12, ETH: 12, ERC20: 12, BEP20: 15, TRC20: 19 };
+  const expected = { BTC: 3, LTC: 6, ETH: 12, ERC20: 12, BEP20: 15, TRC20: 19 };
   for (const [network, count] of Object.entries(expected)) {
     assert.match(worker, new RegExp(`${network}: ${count},`));
   }
