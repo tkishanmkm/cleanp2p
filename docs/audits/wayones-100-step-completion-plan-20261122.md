@@ -53,11 +53,11 @@ No production migration, live transaction, secret change or deployment is part o
 
 21. [x] Validate the configured mnemonic checksum and supported BIP-39 wordlists before active derivation.
 22. [x] Enforce positive, bounded wallet indexes in active mnemonic, xpub and sweep derivation entry points.
-23. [ ] Verify BTC BIP84 mainnet derivation against known address vectors.
-24. [ ] Verify EVM BIP44 derivation and ETH, USDT, USDC and BNB network mapping.
-25. [ ] Verify LTC BIP84 derivation and Litecoin mainnet address vectors.
-26. [ ] Verify TRON BIP44 derivation, Base58Check and TRC20 address mapping.
-27. [ ] Compare derived addresses against approved known-index fixtures without accessing customer private keys.
+23. [x] Verify BTC BIP84 mainnet derivation against known disposable mnemonic address vectors at wallet indices 1, 7 and 316; parity against independent HD-root derivation passes.
+24. [x] Verify EVM BIP44 derivation and ETH/USDT ERC20/USDT BEP20 shared-address mapping against independent disposable-root vectors. USDC/BNB are not in the supported asset set and remain excluded.
+25. [x] Verify LTC BIP84 mainnet derivation against known disposable mnemonic address vectors at wallet indices 1, 7 and 316; parity passes.
+26. [x] Verify TRON BIP44 derivation, Base58Check and USDT TRC20 address mapping against independent disposable-root vectors.
+27. [ ] Compare derived addresses against approved production key-ceremony/known-index fixtures without accessing customer private keys. Disposable fixtures pass but do not satisfy production attestation.
 28. [x] Confirm xpub-only mode is fail-closed and cannot silently fall back to mnemonic mode (source review: mnemonic accessors throw when enabled; all four validated account xpubs are mandatory).
 29. [ ] Enforce immutable user ownership, wallet index and chain-address identity at database level.
 30. [ ] Enforce canonical address uniqueness and cross-registry collision checks (schema-specific chain-aware index migration drafted locally; not applied or verified).
@@ -167,6 +167,13 @@ No production migration, live transaction, secret change or deployment is part o
 ## Completion rule
 
 A step is complete only when its specific change is reviewed and the required evidence exists. A local migration file does not prove it was applied. A passing local quality gate does not prove production financial safety. Unresolved environment, schema, secret, approval or chain-finality blockers remain open.
+
+## Current execution update — 2026-11-28 (six-asset derivation regression batch)
+
+- Rechecked the saved 100-step plan and preserved Step 06 as IN PROGRESS. Steps 23–26 now have disposable known-index derivation parity evidence for BTC, ETH, LTC, USDT ERC20, USDT BEP20 and USDT TRC20 at indexes 1, 7 and 316. USDC and BNB are outside the current supported assets. Step 27 remains open pending production key-ceremony and approved known-index address attestation.
+- The `check_is_admin(uuid,uuid)` permission finding remains a confirmed blocker: current active-project read-only evidence shows authenticated EXECUTE is still true. Do not treat the local ACL migration or its source contract test as remediation; isolated PostgreSQL runtime validation and an approved production migration remain outstanding.
+- Local regression tests now align reserved wallet-index zero rejection and current withdrawal refund finality/verified-unbroadcast parameters. UTXO, ingestion, withdrawal, and internal-transfer focused checks pass; full evidence is in `docs/AUTONOMOUS-PROGRESS.md` dated 2026-11-28. No live database, chain, transaction, worker, or production approval gate was changed.
+- Some broader legacy tests still reference missing migration source versions; migration history reconciliation remains open. Do not infer runtime SQL safety from these static tests.
 
 
 ## Current execution evidence and blockers (2026-11-23)

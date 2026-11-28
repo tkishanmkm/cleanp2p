@@ -12,6 +12,14 @@ import {
   parseDepositAccountXpub,
   type DepositAccountXpubs,
 } from '../src/lib/crypto/hd-derivation';
+const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+const BIP_PATHS = {
+  BTC: "m/84'/0'/0'/0",
+  ETH: "m/44'/60'/0'/0",
+  LTC: "m/84'/2'/0'/0",
+  TRON: "m/44'/195'/0'/0",
+};
 
 function directEvmAddress(root: HDKey, index: number): string {
   const child = root.derive("m/44'/60'/0'/0/" + index);
@@ -45,6 +53,49 @@ function accountXpub(root: HDKey, path: string): string {
 }
 
 describe('Public-only xpub deposit address derivation', () => {
+  it('matches independently derived BIP-84/BIP-44 known-index fixtures for all six supported assets', async () => {
+    const previousMnemonic = process.env.DEPOSIT_HD_MNEMONIC;
+    const previousXpubMode = process.env.PUBLIC_XPUB_DERIVATION_ENABLED;
+    delete process.env.PUBLIC_XPUB_DERIVATION_ENABLED;
+    process.env.DEPOSIT_HD_MNEMONIC = TEST_MNEMONIC;
+
+    try {
+      const seed = await mnemonicToSeed(TEST_MNEMONIC, '');
+      const root = HDKey.fromMasterSeed(seed);
+      seed.fill(0);
+
+      try {
+        for (const index of [1, 7, 316]) {
+          const expected = {
+            BTC: directSegwitAddress(root, `${BIP_PATHS.BTC}/${index}`, 'bc'),
+            ETH: directEvmAddress(root, index),
+            LTC: directSegwitAddress(root, `${BIP_PATHS.LTC}/${index}`, 'ltc'),
+            USDT_ERC20: directEvmAddress(root, index),
+            USDT_BEP20: directEvmAddress(root, index),
+            USDT_TRC20: directTronAddress(root, index),
+          };
+          const xpubs: DepositAccountXpubs = {
+            evm: accountXpub(root, "m/44'/60'/0'"),
+            btc: accountXpub(root, "m/84'/0'/0'"),
+            tron: accountXpub(root, "m/44'/195'/0'"),
+            ltc: accountXpub(root, "m/84'/2'/0'"),
+          };
+          const actual = deriveAllDepositAddressesFromXpubs(xpubs, index);
+          assert.deepEqual(actual, expected, `mainnet xpub derivation mismatch at child index ${index}`);
+          assert.equal(actual.ETH, actual.USDT_ERC20);
+          assert.equal(actual.ETH, actual.USDT_BEP20);
+        }
+      } finally {
+        root.wipePrivateData();
+      }
+    } finally {
+      if (previousMnemonic === undefined) delete process.env.DEPOSIT_HD_MNEMONIC;
+      else process.env.DEPOSIT_HD_MNEMONIC = previousMnemonic;
+      if (previousXpubMode === undefined) delete process.env.PUBLIC_XPUB_DERIVATION_ENABLED;
+      else process.env.PUBLIC_XPUB_DERIVATION_ENABLED = previousXpubMode;
+    }
+  });
+
   it('matches the canonical private-root derivation for all supported chains and indices', async () => {
     const mnemonic = generateMnemonic(englishWordlist, 128);
     const seed = await mnemonicToSeed(mnemonic);
@@ -59,7 +110,7 @@ describe('Public-only xpub deposit address derivation', () => {
         ltc: accountXpub(root, "m/84'/2'/0'"),
       };
 
-      for (const index of [0, 1, 316, 317]) {
+      for (const index of [1, 316, 317]) {
         const actual = deriveAllDepositAddressesFromXpubs(xpubs, index);
 
         const evm = directEvmAddress(root, index);

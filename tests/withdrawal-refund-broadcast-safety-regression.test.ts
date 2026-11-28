@@ -27,7 +27,7 @@ assert.match(fn, /INSERT INTO public\.ledger_entries \([\s\S]*?user_id, crypto, 
 assert.doesNotMatch(fn, /wallet_id,\s*user_id,\s*asset_code,\s*delta_available/i);
 assert.doesNotMatch(adminReview, /p_is_verified_unbroadcast:\s*true/);
 assert.doesNotMatch(manualRefund, /p_is_verified_unbroadcast:\s*true/);
-assert.match(worker, /if\s*\(isConfirmed\s*&&\s*success\)[\s\S]*?else if\s*\(success\s*===\s*false\)[\s\S]*?p_is_verified_revert:\s*true/i);
-assert.match(worker, /if\s*\(confirmations\s*>=\s*chain\.requiredConfirmations\s*&&\s*status\s*===\s*1\)[\s\S]*?else if\s*\(status\s*===\s*0\)[\s\S]*?p_is_verified_revert:\s*true/i);
+assert.match(worker, /if\s*\(isConfirmed\s*&&\s*success\)[\s\S]*?else if\s*\(success\s*===\s*false\s*&&\s*confirmations\s*>=\s*TRON_CONFIG\.requiredConfirmations\)[\s\S]*?p_is_verified_unbroadcast:\s*true/i);
+assert.match(worker, /if\s*\(confirmations\s*>=\s*chain\.requiredConfirmations\s*&&\s*status\s*===\s*1\)[\s\S]*?else if\s*\(status\s*===\s*0\s*&&\s*confirmations\s*>=\s*chain\.requiredConfirmations\)[\s\S]*?p_is_verified_unbroadcast:\s*true/i);
 
 console.log('Withdrawal refund broadcast-safety regression contract checks passed.');

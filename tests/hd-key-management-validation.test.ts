@@ -60,9 +60,13 @@ describe('BIP-39 wallet seed validation', () => {
 
 describe('BIP-32 wallet child-index validation', () => {
   it('accepts the non-hardened child index range', () => {
-    assert.doesNotThrow(() => validateWalletDerivationIndex(0));
+    // Index zero is reserved by the product's shared wallet allocator policy.
     assert.doesNotThrow(() => validateWalletDerivationIndex(1));
     assert.doesNotThrow(() => validateWalletDerivationIndex(0x7fffffff));
+  });
+
+  it('rejects the reserved index zero', () => {
+    assert.throws(() => validateWalletDerivationIndex(0), /positive safe BIP-32 child index/);
   });
 
   it('rejects unsafe, negative, fractional and hardened child indices', () => {
