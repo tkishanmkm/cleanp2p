@@ -301,3 +301,10 @@ A step is complete only when its specific change is reviewed and the required ev
 - No production migration/permission change, real key access, financial transaction, signing, broadcast, sweep, worker activation, or deployment occurred. Next: continue address ownership/deposit registration and then confirmation/reorg, KYT, atomic ledger/reconciliation, withdrawal settlement and sweep/gas items. Preserve all prior step statuses.
 
 - Verified withdrawal audit/test batch commit: 7b50f3cfede9c7bb9f3ad643cf550142899e5e74.
+
+## Additional safe checks — 2026-11-28 (deposit confirmation, reorg and reconciliation)
+
+- Steps 31–50 were advanced through a targeted source-contract run: confirmation evidence/credit response, ingestion overlap, BTC/LTC output identity, TRON indexes, webhook trust, deposit worker leases, EVM chain finality, ledger reconciliation gating, and persistent withdrawal confirmation scheduling passed **37/37**. No implementation defect was confirmed in these checks.
+- The source contracts show fail-closed credit behavior for missing chain evidence and mismatched thresholds; deterministic scheduled confirmation selection; actual chain/allowlisted-token validation for EVM scans; expiring per-deposit worker claim tokens; and explicit UTXO output and TRON event indexes. These tests do not replace isolated database or test-chain runtime tests.
+- `canonical-deposit-cutover.test.ts` remains blocked by the absence of disposable database configuration and was not run against production. Step 06 stays **IN PROGRESS**, Step 27 stays **OPEN**, and `check_is_admin(uuid,uuid)` stays a live security blocker.
+- No code or database changed in this test batch; no key access, financial transaction, worker activation or production operation occurred.

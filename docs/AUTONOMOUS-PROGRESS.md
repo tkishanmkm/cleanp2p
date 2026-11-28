@@ -559,3 +559,10 @@ Codex CLI is authenticated (`Logged in using ChatGPT`) but the autonomous runner
 - Safe verification only: no key material, production SQL writes/migrations, financial activity, signing, broadcasts, sweeps, worker activation, or deployment occurred. Continue with the next incomplete address/deposit ownership checks and then confirmation/reorg/KYT/ledger and withdrawal/sweep/gas steps. Record each independently verified batch; do not infer overall readiness from static tests.
 
 - Verified withdrawal audit/test batch commit: 7b50f3cfede9c7bb9f3ad643cf550142899e5e74.
+
+## Additional safe checks — 2026-11-28 (deposit confirmation, reorg and reconciliation)
+
+- Continued the independent Steps 31–50 and reconciliation/scheduling review after the withdrawal contract batch. Confirmation worker, chain-verification, credit-RPC response, ingestion single-flight, UTXO output-index, webhook trust, deposit lease, EVM scanner finality, withdrawal scheduling, and disabled-until-verified ledger reconciliation tests pass **37/37**.
+- The checks confirm credit is withheld when chain evidence or stored thresholds are missing/mismatched; BTC/LTC output indexes and TRON event indexes are required; EVM token scans validate actual chain and fixed contract; deposit claims use expiring owner tokens; and confirmation scheduling is persistent and deterministic. No implementation changes were needed in this test batch.
+- `canonical-deposit-cutover.test.ts` remains unrun because its safety guard requires an isolated disposable database configuration. It was not pointed at Supabase. Production database identity and blockers remain as recorded above; Step 06, Step 27, and the `check_is_admin` ACL blocker remain unchanged.
+- No live database access beyond prior read-only catalog checks, financial operation, signing, broadcast, sweep, or worker activation occurred.
